@@ -1,8 +1,6 @@
-extern crate image;
-
 use std::fs::File;
 use std::path::Path;
-use self::image::{ImageBuffer, Rgb};
+use image::{self, ImageBuffer, Rgb, imageops};
 
 pub struct Img {
     buf: ImageBuffer<Rgb<u8>, Vec<u8>>,
@@ -25,6 +23,10 @@ impl Img {
         if x < self.w && y < self.h {
             self.buf.put_pixel(x, y, Rgb([color.0, color.1, color.2]));
         }
+    }
+
+    pub fn flip_vertical(&mut self) {
+        self.buf = imageops::flip_vertical(&self.buf);
     }
 
     pub fn save(self, path: &str) {

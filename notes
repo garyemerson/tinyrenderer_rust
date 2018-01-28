@@ -1,0 +1,10 @@
+Lesson 1
+--------
+if going from x0 to x1 and using time interval t of 0 -> 1 then x values will be:
+    
+    x0 + (x1 - x0)*t <=>
+    x0 + x1*t + x0*t <=>
+    x0 - x0*t + x1*t <=>
+    x0*(1 - t) + x1*t
+
+same for going from y0 to y1
