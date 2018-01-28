@@ -65,11 +65,13 @@ fn line4(mut x0: u32, mut y0: u32, mut x1: u32, mut y1: u32, img: &mut Img, colo
         mem::swap(&mut y0, &mut y1);
     }
 
-    println!("drawing line ({}, {}) ({}, {})", x0, y0, x1, y1);
+    // println!("drawing line ({}, {}) ({}, {})", x0, y0, x1, y1);
 
     let dx = ((x0 as i32) - (x1 as i32)).abs();
     let dy = ((y0 as i32) - (y1 as i32)).abs();
-    let mut y = y0;
+    // make this signed bc of the corner case where the last px is on the 0 boundary and the y
+    // increment logic will subtract 1 and underflow if unsigned
+    let mut y: i32 = y0 as i32;
     let mut error2: i32 = 0;
 
     for x in x0..(x1 + 1) {
@@ -78,7 +80,6 @@ fn line4(mut x0: u32, mut y0: u32, mut x1: u32, mut y1: u32, img: &mut Img, colo
         if 2 * (error2 + dy) < dx {
             error2 = error2 + dy;
         } else {
-            // TODO: somehow y is becoming negative with diablo3 wirefram
             y = if y1 > y0 { y + 1 } else { y - 1 };
             error2 = error2 + dy - dx; 
         }
