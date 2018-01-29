@@ -3,7 +3,7 @@
 	[
 		{
 			"name": "Run Project",
-			"shell_cmd": "cd /Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust && /Users/Garrett/.cargo/bin/cargo run && open output.png",
+			"shell_cmd": "cd /Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust && RUST_BACKTRACE=1 /Users/Garrett/.cargo/bin/cargo run && open output.png",
 			"syntax": "build_results.sublime-syntax"
 		}
 	],

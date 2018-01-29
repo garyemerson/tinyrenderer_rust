@@ -8,3 +8,7 @@ if going from x0 to x1 and using time interval t of 0 -> 1 then x values will be
     x0*(1 - t) + x1*t
 
 same for going from y0 to y1
+
+Lesson 2
+--------
+Barycentric coord of a point given a triangle can be thought of as the weights to corresponding vertices on the triangle. The weights need to add to 1. The closer you are to a point, the higher it's weight. A weight can only be negative if the point lies outside the triangle.
