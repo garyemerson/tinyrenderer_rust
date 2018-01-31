@@ -30,7 +30,7 @@ impl Img {
     }
 
     pub fn save(self, path: &str) {
-        let ref mut fout = File::create(&Path::new(path)).unwrap();
-        let _ = image::ImageRgb8(self.buf).save(fout, image::PNG);
+        let f = &mut File::create(&Path::new(path)).unwrap();
+        image::ImageRgb8(self.buf).save(f, image::PNG).unwrap();
     }
 }

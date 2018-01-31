@@ -14,6 +14,10 @@ use std::fmt;
 use std::cmp::{min, max};
 use rand::random;
 use std::f32;
+use image::DecodingResult::{U8, U16};
+use image::tga::TGADecoder;
+use image::{ImageDecoder, ImageBuffer, Rgb};
+use std::path::Path;
 
 #[derive(Clone, Copy)]
 struct Pt {
@@ -43,6 +47,7 @@ impl fmt::Display for Pt3 {
     }
 }
 
+const WHITE: (u8, u8, u8) = (255, 255, 255);
 const RED: (u8, u8, u8) = (255, 0, 0);
 const GREEN: (u8, u8, u8) = (0, 255, 0);
 const BLUE: (u8, u8, u8) = (0, 0, 255);
@@ -64,16 +69,28 @@ fn main() {
     //     &mut img,
     //     width,
     //     height);
-    // println!(
-    //     "{:?}",
-    //     barycentric(Pt{x: 1, y: 1}, (Pt{x: 1, y: 2}, Pt{x: 4, y: 2}, Pt{x: 3, y: 4})));
+
+    // // TODO: Fix this weird pixel crap
+    // let (width, height): (f32, f32) = (800.0, 800.0);
+    // let mut img = Img::new(width as u32, height as u32);
+    // let t = (Pt{x: 10, y: 20}, Pt{x: 40, y: 20}, Pt{x: 30, y: 40});
+    // let p = Pt{x: 10, y: 10};
+    // draw_triangle3(t.0, t.1, t.2, &mut img, RED);
+
+    // let t = (Pt{x: 100, y: 200}, Pt{x: 400, y: 200}, Pt{x: 300, y: 400});
+    // let p = Pt{x: 300, y: 300};
+    // let c = bary_to_cart(t, (0.33, 0.33, 0.33));
+    // println!("{:?}", barycentric(p, t));
+    // draw_triangle3(t.0, t.1, t.2, &mut img, RED);
+    // img.set(p.x as u32, p.y as u32, GREEN);
+    // img.set(c.x as u32, c.x as u32, BLUE);
 
     // // scene "2d mesh"
     // line4(20, 34, 744, 400, &mut img, RED);
     // line4(120, 434, 444, 400, &mut img, GREEN);
     // line4(330, 463, 594, 200, &mut img, BLUE);
     // // screen line
-    // line4(10, 10, 790, 10, &mut img, (255, 255, 255));
+    // line4(10, 10, 790, 10, &mut img, WHITE);
 
     // let mut ybuffer: Vec<i32> = vec![i32::min_value(); width as usize];
     // rasterize(Pt { x: 20, y: 34 },   Pt { x: 744, y: 400 }, &mut img, RED,   &mut ybuffer);
@@ -82,6 +99,7 @@ fn main() {
 
     model_with_zbuffer(
         "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
+        "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head_diffuse.tga",
         &mut img,
         width,
         height);
@@ -98,34 +116,55 @@ fn world_to_screen(p: Pt3, width: f32, height: f32) -> Pt3 {
     }
 }
 
-fn model_with_zbuffer(path: &str, img: &mut Img, width: f32, height: f32) {
+fn read_texture(path: &str) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
+    let mut decoder = TGADecoder::new(File::open(path).unwrap());
+    let (width, height) = decoder.dimensions().unwrap();
+    let color_type = decoder.colortype().unwrap();
+    println!("color_type is {:?}, width is {}, height is {}", color_type, width, height);
+    let texture = match decoder.read_image().unwrap() {
+        U8(vec) => {
+            ImageBuffer::<Rgb<u8>, Vec<u8>>::from_raw(width, height, vec).unwrap()
+        },
+        U16(_) => {
+            // TODO: should probably fix this?
+            let v: Vec<u8> = Vec::new();
+            ImageBuffer::<Rgb<u8>, Vec<u8>>::from_raw(width, height, v).unwrap()
+        },
+    };
+    texture
+}
+
+fn model_with_zbuffer(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
-    let (vertices, faces) = parse_obj_file(path);
+    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    println!("{} texture vertices", texture_vertices.len());
+    let texture = read_texture(texture_path);
+
     for f in faces {
         let p0 = Pt3 { 
-            x: vertices[(f.0 - 1)].0,
-            y: vertices[(f.0 - 1)].1,
-            z: vertices[(f.0 - 1)].2,
+            x: vertices[((f.0).0 - 1)].0,
+            y: vertices[((f.0).0 - 1)].1,
+            z: vertices[((f.0).0 - 1)].2,
         };
         let p1 = Pt3 { 
-            x: vertices[(f.1 - 1)].0,
-            y: vertices[(f.1 - 1)].1,
-            z: vertices[(f.1 - 1)].2,
+            x: vertices[((f.0).1 - 1)].0,
+            y: vertices[((f.0).1 - 1)].1,
+            z: vertices[((f.0).1 - 1)].2,
         };
         let p2 = Pt3 { 
-            x: vertices[(f.2 - 1)].0,
-            y: vertices[(f.2 - 1)].1,
-            z: vertices[(f.2 - 1)].2,
+            x: vertices[((f.0).2 - 1)].0,
+            y: vertices[((f.0).2 - 1)].1,
+            z: vertices[((f.0).2 - 1)].2,
         };
 
         let u = (
-            vertices[(f.1 - 1)].0 - vertices[(f.0 - 1)].0,
-            vertices[(f.1 - 1)].1 - vertices[(f.0 - 1)].1,
-            vertices[(f.1 - 1)].2 - vertices[(f.0 - 1)].2);
+            vertices[((f.0).1 - 1)].0 - vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).1 - 1)].1 - vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).1 - 1)].2 - vertices[((f.0).0 - 1)].2);
         let v = (
-            vertices[(f.2 - 1)].0 - vertices[(f.0 - 1)].0,
-            vertices[(f.2 - 1)].1 - vertices[(f.0 - 1)].1,
-            vertices[(f.2 - 1)].2 - vertices[(f.0 - 1)].2);
+            vertices[((f.0).2 - 1)].0 - vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).2 - 1)].1 - vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).2 - 1)].2 - vertices[((f.0).0 - 1)].2);
         let mut norm = (
             (u.1 * v.2 - u.2 * v.1),
             (u.2 * v.0 - u.0 * v.2),
@@ -143,21 +182,84 @@ fn model_with_zbuffer(path: &str, img: &mut Img, width: f32, height: f32) {
         let light_insensity = 1.0 * norm.2;
         // println!("light_insensity is {}", light_insensity);
         if light_insensity > 0.0 {
-            triangle_with_zbuff(
+            // triangle_with_zbuff(
+            //     p0s,
+            //     p1s,
+            //     p2s,
+            //     img,
+            //     ((light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8),
+            //     &mut zbuffer);
+
+            let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
+            // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
+            let (ptx0, ptx1, ptx2) = (
+                Pt { x: (texture_vertices[vt0].0 * 1024.0) as i32, y: (texture_vertices[vt0].1 * 1024.0) as i32 },
+                Pt { x: (texture_vertices[vt1].0 * 1024.0) as i32, y: (texture_vertices[vt1].1 * 1024.0) as i32 },
+                Pt { x: (texture_vertices[vt2].0 * 1024.0) as i32, y: (texture_vertices[vt2].1 * 1024.0) as i32 });
+            triangle_with_zbuff_and_texture(
                 p0s,
                 p1s,
                 p2s,
+                ptx0,
+                ptx1,
+                ptx2,
                 img,
-                ((light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8),
+                light_insensity,
+                &texture,
                 &mut zbuffer);
         }
     }
 }
 
+fn triangle_with_zbuff_and_texture(
+    p0: Pt3,
+    p1: Pt3,
+    p2: Pt3,
+    ptx0: Pt,
+    ptx1: Pt,
+    ptx2: Pt,
+    img: &mut Img,
+    light_insensity: f32,
+    texture: &ImageBuffer<Rgb<u8>, Vec<u8>>,
+    zbuffer: &mut Vec<Vec<f32>>)
+{
+    let bb_up_right = Pt { x: max(p0.x as i32, max(p1.x as i32, p2.x as i32)), y: max(0, min(p0.y as i32, min(p1.y as i32, p2.y as i32))) };
+    let bb_lower_left = Pt { x: max(0, min(p0.x as i32, min(p1.x as i32, p2.x as i32))), y: max(p0.y as i32, max(p1.y as i32, p2.y as i32)) };
+
+    for x in bb_lower_left.x..(bb_up_right.x + 1) {
+        for y in bb_up_right.y..(bb_lower_left.y + 1) {
+            let bary = barycentric(Pt { x, y }, (p0.pt2(), p1.pt2(), p2.pt2()));
+
+            if bary.0 >= 0.0 && bary.1 >= 0.0 && bary.2 >= 0.0 {
+                // ???: How is this the z coord
+                let mut z = p0.z as f32 * bary.0
+                    + p1.z as f32 * bary.1
+                    + p2.z as f32 * bary.2;
+
+                // coordinate in the texture
+                let tcoord = bary_to_cart(
+                    (ptx0, ptx1, ptx2),
+                    bary);
+                // texture pixel to use
+                let tpx = texture.get_pixel(tcoord.x as u32, (1024 - tcoord.y) as u32);
+                let color = (
+                    (tpx[0] as f32 * light_insensity) as u8,
+                    (tpx[1] as f32 * light_insensity) as u8,
+                    (tpx[2] as f32 * light_insensity) as u8);
+
+                if zbuffer[x as usize][y as usize] < z {
+                    zbuffer[x as usize][y as usize] = z;
+                    img.set(x as u32, y as u32, color);
+                }
+            }
+        }
+    }
+}
+
 fn triangle_with_zbuff(
-    mut p0: Pt3,
-    mut p1: Pt3,
-    mut p2: Pt3,
+    p0: Pt3,
+    p1: Pt3,
+    p2: Pt3,
     img: &mut Img,
     color: (u8, u8, u8),
     zbuffer: &mut Vec<Vec<f32>>)
@@ -198,32 +300,31 @@ fn rasterize(mut p0: Pt, mut p1: Pt, img: &mut Img, color: (u8, u8, u8), ybuffer
 }
 
 fn lit_triangle_model(path: &str, img: &mut Img, width: f32, height: f32) {
-    let (vertices, faces) = parse_obj_file(path);
+    let (vertices, faces, _) = parse_obj_file(path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
 
-    let mut rng = rand::thread_rng();
     for f in faces {
         let p0 = Pt { 
-            x: ((vertices[(f.0 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
-            y: ((vertices[(f.0 - 1)].1 + 1.0) * height / 2.0).floor() as i32
+            x: ((vertices[((f.0).0 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
+            y: ((vertices[((f.0).0 - 1)].1 + 1.0) * height / 2.0).floor() as i32
         };
         let p1 = Pt { 
-            x: ((vertices[(f.1 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
-            y: ((vertices[(f.1 - 1)].1 + 1.0) * height / 2.0).floor() as i32
+            x: ((vertices[((f.0).1 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
+            y: ((vertices[((f.0).1 - 1)].1 + 1.0) * height / 2.0).floor() as i32
         };
         let p2 = Pt { 
-            x: ((vertices[(f.2 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
-            y: ((vertices[(f.2 - 1)].1 + 1.0) * height / 2.0).floor() as i32
+            x: ((vertices[((f.0).2 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
+            y: ((vertices[((f.0).2 - 1)].1 + 1.0) * height / 2.0).floor() as i32
         };
 
         let u = (
-            vertices[(f.1 - 1)].0 - vertices[(f.0 - 1)].0,
-            vertices[(f.1 - 1)].1 - vertices[(f.0 - 1)].1,
-            vertices[(f.1 - 1)].2 - vertices[(f.0 - 1)].2);
+            vertices[((f.0).1 - 1)].0 - vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).1 - 1)].1 - vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).1 - 1)].2 - vertices[((f.0).0 - 1)].2);
         let v = (
-            vertices[(f.2 - 1)].0 - vertices[(f.0 - 1)].0,
-            vertices[(f.2 - 1)].1 - vertices[(f.0 - 1)].1,
-            vertices[(f.2 - 1)].2 - vertices[(f.0 - 1)].2);
+            vertices[((f.0).2 - 1)].0 - vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).2 - 1)].1 - vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).2 - 1)].2 - vertices[((f.0).0 - 1)].2);
         let mut norm = (
             (u.1 * v.2 - u.2 * v.1),
             (u.2 * v.0 - u.0 * v.2),
@@ -247,22 +348,21 @@ fn lit_triangle_model(path: &str, img: &mut Img, width: f32, height: f32) {
 }
 
 fn rand_triangle_model(path: &str, img: &mut Img, width: f32, height: f32) {
-    let (vertices, faces) = parse_obj_file(path);
+    let (vertices, faces, _) = parse_obj_file(path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
 
-    let mut rng = rand::thread_rng();
     for f in faces {
         let p0 = Pt { 
-            x: ((vertices[(f.0 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
-            y: ((vertices[(f.0 - 1)].1 + 1.0) * height / 2.0).floor() as i32
+            x: ((vertices[((f.0).0 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
+            y: ((vertices[((f.0).0 - 1)].1 + 1.0) * height / 2.0).floor() as i32
         };
         let p1 = Pt { 
-            x: ((vertices[(f.1 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
-            y: ((vertices[(f.1 - 1)].1 + 1.0) * height / 2.0).floor() as i32
+            x: ((vertices[((f.0).1 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
+            y: ((vertices[((f.0).1 - 1)].1 + 1.0) * height / 2.0).floor() as i32
         };
         let p2 = Pt { 
-            x: ((vertices[(f.2 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
-            y: ((vertices[(f.2 - 1)].1 + 1.0) * height / 2.0).floor() as i32
+            x: ((vertices[((f.0).2 - 1)].0 + 1.0) * width / 2.0).floor() as i32,
+            y: ((vertices[((f.0).2 - 1)].1 + 1.0) * height / 2.0).floor() as i32
         };
         draw_triangle3(p0, p1, p2, img, (random::<u8>(), random::<u8>(), random::<u8>()));
     }
@@ -273,12 +373,19 @@ fn triangle_exercises(img: &mut Img) {
     // let t1 = [ Pt { x: 180, y: 50 }, Pt { x: 150, y: 1 }, Pt { x: 70, y: 180 } ];
     // let t2 = [ Pt { x: 180, y: 150 }, Pt { x: 120, y: 160 }, Pt { x: 130, y: 180 } ];
     // draw_triangle3(t0[0], t0[1], t0[2], &mut img, RED); 
-    // draw_triangle3(t1[0], t1[1], t1[2], &mut img, (255, 255, 255)); 
+    // draw_triangle3(t1[0], t1[1], t1[2], &mut img, WHITE); 
     // draw_triangle3(t2[0], t2[1], t2[2], &mut img, GREEN);
 
     // let t = [ Pt { x: 10, y: 10 }, Pt { x: 100, y:  30 }, Pt { x: 190, y:  160 } ];
     let t = [ Pt { x: 10, y: 10 }, Pt { x: 100, y:  30 }, Pt { x: 100, y:  160 } ];
     draw_triangle3(t[0], t[1], t[2], img, RED); 
+}
+
+fn bary_to_cart(t: (Pt, Pt, Pt), b: (f32, f32, f32)) -> Pt {
+    let p = (
+        b.0 * t.0.x as f32 + b.1 * t.1.x as f32 + b.2 * t.2.x as f32,
+        b.0 * t.0.y as f32 + b.1 * t.1.y as f32 + b.2 * t.2.y as f32);
+    Pt { x: p.0 as i32, y: p.1 as i32 }
 }
 
 fn barycentric(p: Pt, t: (Pt, Pt, Pt)) -> (f32, f32, f32) {
@@ -295,7 +402,7 @@ fn inside_triangle(p: Pt, t: (Pt, Pt, Pt)) -> bool {
     let b = barycentric(p, t);
     b.0 >= 0.0 && b.1 >= 0.0 && b.2 >= 0.0
 }
-fn draw_triangle3(mut p0: Pt, mut p1: Pt, mut p2: Pt, img: &mut Img, color: (u8, u8, u8)) {
+fn draw_triangle3(p0: Pt, p1: Pt, p2: Pt, img: &mut Img, color: (u8, u8, u8)) {
     // bounding box points
     let bb_up_right = Pt { x: max(p0.x, max(p1.x, p2.x)), y: min(p0.y, min(p1.y, p2.y)) };
     let bb_lower_left = Pt { x: min(p0.x, min(p1.x, p2.x)), y: max(p0.y, max(p1.y, p2.y)) };
@@ -309,7 +416,7 @@ fn draw_triangle3(mut p0: Pt, mut p1: Pt, mut p2: Pt, img: &mut Img, color: (u8,
     }
 }
 
-fn draw_triangle2(mut p0: Pt, mut p1: Pt, mut p2: Pt, img: &mut Img, color: (u8, u8, u8)) {
+fn draw_triangle2(mut p0: Pt, mut p1: Pt, mut p2: Pt, img: &mut Img) {
     if p0.y > p1.y { mem::swap(&mut p0, &mut p1); }
     if p1.y > p2.y { mem::swap(&mut p1, &mut p2); }
     if p0.y > p1.y { mem::swap(&mut p1, &mut p2); }
@@ -328,7 +435,7 @@ fn draw_triangle2(mut p0: Pt, mut p1: Pt, mut p2: Pt, img: &mut Img, color: (u8,
         // println!("sweeping y horizontal {} from x {} to {}", y, ax, bx);
         for x in ax..(bx + 1) {
             // println!("setting px ({}, {})", x, y);
-            img.set(x as u32, y as u32, (255, 255, 255));
+            img.set(x as u32, y as u32, WHITE);
         }
     }
     // println!("upper half");
@@ -342,7 +449,7 @@ fn draw_triangle2(mut p0: Pt, mut p1: Pt, mut p2: Pt, img: &mut Img, color: (u8,
         if ax > bx { mem::swap(&mut ax, &mut bx); }
         for x in ax..(bx + 1) {
             // println!("setting px ({}, {})", x, y);
-            img.set(x as u32, y as u32, (255, 255, 255));
+            img.set(x as u32, y as u32, WHITE);
         }
     }
 }
@@ -355,39 +462,39 @@ fn draw_triangle(p0: Pt, p1: Pt, p2: Pt, img: &mut Img, color: (u8, u8, u8)) {
 
 fn line_benchmark(img: &mut Img) {
     for _ in 0..1000000 {
-        line4(50, 50, 50, 60, img, (255, 255, 255));
-        line4(50, 50, 50, 40, img, (255, 255, 255));
-        line4(50, 50, 60, 60, img, (255, 255, 255));
-        line4(50, 50, 60, 50, img, (255, 255, 255));
-        line4(50, 50, 40, 50, img, (255, 255, 255));
-        line4(50, 50, 60, 40, img, (255, 255, 255));
-        line4(50, 50, 40, 60, img, (255, 255, 255));
-        line4(50, 50, 40, 40, img, (255, 255, 255));
+        line4(50, 50, 50, 60, img, WHITE);
+        line4(50, 50, 50, 40, img, WHITE);
+        line4(50, 50, 60, 60, img, WHITE);
+        line4(50, 50, 60, 50, img, WHITE);
+        line4(50, 50, 40, 50, img, WHITE);
+        line4(50, 50, 60, 40, img, WHITE);
+        line4(50, 50, 40, 60, img, WHITE);
+        line4(50, 50, 40, 40, img, WHITE);
     }
 }
 
 fn draw_wireframe(path: &str, img: &mut Img, width: f32, height: f32) {
-    let (vertices, faces) = parse_obj_file(path);
+    let (vertices, faces, _) = parse_obj_file(path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
     for f in faces {
         line4(
-            ((vertices[(f.0 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
-            ((vertices[(f.0 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
-            ((vertices[(f.1 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
-            ((vertices[(f.1 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
-            img, (255, 255, 255));
+            ((vertices[((f.0).0 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
+            ((vertices[((f.0).0 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
+            ((vertices[((f.0).1 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
+            ((vertices[((f.0).1 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
+            img, WHITE);
         line4(
-            ((vertices[(f.1 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
-            ((vertices[(f.1 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
-            ((vertices[(f.2 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
-            ((vertices[(f.2 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
-            img, (255, 255, 255));
+            ((vertices[((f.0).1 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
+            ((vertices[((f.0).1 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
+            ((vertices[((f.0).2 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
+            ((vertices[((f.0).2 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
+            img, WHITE);
         line4(
-            ((vertices[(f.2 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
-            ((vertices[(f.2 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
-            ((vertices[(f.0 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
-            ((vertices[(f.0 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
-            img, (255, 255, 255));
+            ((vertices[((f.0).2 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
+            ((vertices[((f.0).2 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
+            ((vertices[((f.0).0 - 1)].0 + 1.0) * width / 2.0).floor() as u32,
+            ((vertices[((f.0).0 - 1)].1 + 1.0) * height / 2.0).floor() as u32,
+            img, WHITE);
     }
 }
 
@@ -490,16 +597,22 @@ fn line(x0: u32, y0: u32, x1: u32, y1: u32, img: &mut Img, color: (u8, u8, u8)) 
     }
 }
 
-// Returns (vertices, faces)
-fn parse_obj_file(path: &str) -> (Vec<(f32, f32, f32)>, Vec<(usize, usize, usize)>) {
+// Returns (vertices, (face vertices, face texture vertices), texture vertices)
+fn parse_obj_file(path: &str) -> (
+    Vec<(f32, f32, f32)>,
+    Vec<((usize, usize, usize), (usize, usize, usize))>,
+    Vec<(f32, f32)>)
+{
     let f = File::open(path).unwrap();
-    let mut buffer = BufReader::new(f);
+    let buffer = BufReader::new(f);
 
     let mut vertices = Vec::new();
     let mut faces = Vec::new();
+    let mut texture_vertices = Vec::new();
 
     let vre = Regex::new(r"v ([\d\-\.e]+) ([\d\-\.e]+) ([\d\-\.e]+)").unwrap();
-    let fre = Regex::new(r"f (\d+)/[^ ]+ (\d+)/[^ ]+ (\d+)/[^ ]+").unwrap();
+    let fre = Regex::new(r"f (\d+)/(\d+)[^ ]+ (\d+)/(\d+)[^ ]+ (\d+)/(\d+)[^ ]+").unwrap();
+    let tre = Regex::new(r"vt\s+([\d\-\.e]+) ([\d\-\.e]+)").unwrap();
 
     for l in buffer.lines() {
         let l = l.unwrap();
@@ -514,13 +627,24 @@ fn parse_obj_file(path: &str) -> (Vec<(f32, f32, f32)>, Vec<(usize, usize, usize
         } else if l.starts_with("f ") {
             for cap in fre.captures_iter(&l) {
                 let f1 = &cap[1].trim();
-                let f2 = &cap[2].trim();
-                let f3 = &cap[3].trim();
-                let f = (f1.parse::<usize>().unwrap(), f2.parse::<usize>().unwrap(), f3.parse::<usize>().unwrap());
-                faces.push(f);
+                let f2 = &cap[3].trim();
+                let f3 = &cap[5].trim();
+                let ft1 = &cap[2].trim();
+                let ft2 = &cap[4].trim();
+                let ft3 = &cap[6].trim();
+                let face = (f1.parse::<usize>().unwrap(), f2.parse::<usize>().unwrap(), f3.parse::<usize>().unwrap());
+                let face_texture = (ft1.parse::<usize>().unwrap(), ft2.parse::<usize>().unwrap(), ft3.parse::<usize>().unwrap());
+                faces.push((face, face_texture));
+            }
+        } else if l.starts_with("vt ") {
+            for cap in tre.captures_iter(&l) {
+                let vt1 = &cap[1].trim();
+                let vt2 = &cap[2].trim();
+                let vt = (vt1.parse::<f32>().unwrap(), vt2.parse::<f32>().unwrap());
+                texture_vertices.push(vt);
             }
         }
     }
 
-    (vertices, faces)
+    (vertices, faces, texture_vertices)
 }
