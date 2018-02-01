@@ -97,7 +97,14 @@ fn main() {
     // rasterize(Pt { x: 120, y: 434 }, Pt { x: 444, y: 400 }, &mut img, GREEN, &mut ybuffer);
     // rasterize(Pt { x: 330, y: 463 }, Pt { x: 594, y: 200 }, &mut img, BLUE,  &mut ybuffer);
 
-    model_with_zbuffer(
+    // model_with_zbuffer(
+    //     "/Users/Garrett/Downloads/snapchat-dancing-hotdog-meme-whole-hotdog.stl.obj",
+    //     // "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
+    //     &mut img,
+    //     width,
+    //     height);
+
+    model_with_zbuffer_and_texture(
         "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
         "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head_diffuse.tga",
         &mut img,
@@ -134,7 +141,7 @@ fn read_texture(path: &str) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
     texture
 }
 
-fn model_with_zbuffer(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
+fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
     let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
     println!("{} texture vertices", texture_vertices.len());
@@ -206,6 +213,72 @@ fn model_with_zbuffer(model_path: &str, texture_path: &str, img: &mut Img, width
                 img,
                 light_insensity,
                 &texture,
+                &mut zbuffer);
+        }
+    }
+}
+
+fn model_with_zbuffer(model_path: &str, img: &mut Img, width: f32, height: f32) {
+    let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
+    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    println!("{} vertices, {} faces", vertices.len(), faces.len());
+
+    for f in faces {
+        let p0 = Pt3 { 
+            x: vertices[((f.0).0 - 1)].0,
+            y: vertices[((f.0).0 - 1)].1,
+            z: vertices[((f.0).0 - 1)].2,
+        };
+        let p1 = Pt3 { 
+            x: vertices[((f.0).1 - 1)].0,
+            y: vertices[((f.0).1 - 1)].1,
+            z: vertices[((f.0).1 - 1)].2,
+        };
+        let p2 = Pt3 { 
+            x: vertices[((f.0).2 - 1)].0,
+            y: vertices[((f.0).2 - 1)].1,
+            z: vertices[((f.0).2 - 1)].2,
+        };
+
+        let u = (
+            vertices[((f.0).1 - 1)].0 - vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).1 - 1)].1 - vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).1 - 1)].2 - vertices[((f.0).0 - 1)].2);
+        let v = (
+            vertices[((f.0).2 - 1)].0 - vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).2 - 1)].1 - vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).2 - 1)].2 - vertices[((f.0).0 - 1)].2);
+        let mut norm = (
+            (u.1 * v.2 - u.2 * v.1),
+            (u.2 * v.0 - u.0 * v.2),
+            (u.0 * v.1 - u.1 * v.0));
+        let mag = (norm.0.powi(2) + norm.1.powi(2) + norm.2.powi(2)).sqrt();
+        norm.0 = norm.0 / mag;
+        norm.1 = norm.1 / mag;
+        norm.2 = norm.2 / mag;
+
+        let p0s = world_to_screen(p0, width, height);
+        let p1s = world_to_screen(p1, width, height);
+        let p2s = world_to_screen(p2, width, height);
+
+        // light direction is (0, 0, 1)
+        let light_insensity = 1.0 * norm.2;
+        // println!("light_insensity is {}", light_insensity);
+        if light_insensity > 0.0 {
+            // triangle_with_zbuff(
+            //     p0s,
+            //     p1s,
+            //     p2s,
+            //     img,
+            //     ((light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8),
+            //     &mut zbuffer);
+
+            triangle_with_zbuff(
+                p0s,
+                p1s,
+                p2s,
+                img,
+                ((255.0 * light_insensity) as u8, (255.0 * light_insensity) as u8, (255.0 * light_insensity) as u8),
                 &mut zbuffer);
         }
     }
@@ -610,9 +683,9 @@ fn parse_obj_file(path: &str) -> (
     let mut faces = Vec::new();
     let mut texture_vertices = Vec::new();
 
-    let vre = Regex::new(r"v ([\d\-\.e]+) ([\d\-\.e]+) ([\d\-\.e]+)").unwrap();
-    let fre = Regex::new(r"f (\d+)/(\d+)[^ ]+ (\d+)/(\d+)[^ ]+ (\d+)/(\d+)[^ ]+").unwrap();
-    let tre = Regex::new(r"vt\s+([\d\-\.e]+) ([\d\-\.e]+)").unwrap();
+    let vre = Regex::new(r"v\s+([\d\-\.e]+)\s+([\d\-\.e]+)\s+([\d\-\.e]+)").unwrap();
+    let fre = Regex::new(r"f\s+(\d*)/(\d*)[^ ]+\s+(\d*)/(\d*)[^ ]+\s+(\d*)/(\d*)[^ ]+").unwrap();
+    let tre = Regex::new(r"vt\s+([\d\-\.e]+)\s+([\d\-\.e]+)").unwrap();
 
     for l in buffer.lines() {
         let l = l.unwrap();
