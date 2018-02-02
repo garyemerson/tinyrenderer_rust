@@ -104,7 +104,14 @@ fn main() {
     //     width,
     //     height);
 
-    model_with_zbuffer_and_texture(
+    // model_with_zbuffer_and_texture(
+    //     "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
+    //     "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head_diffuse.tga",
+    //     &mut img,
+    //     width,
+    //     height);
+
+    model_with_zbuffer_texture_perspective(
         "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
         "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head_diffuse.tga",
         &mut img,
@@ -141,6 +148,75 @@ fn read_texture(path: &str) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
     texture
 }
 
+fn model_with_zbuffer_texture_perspective(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
+    let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
+    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    println!("{} texture vertices", texture_vertices.len());
+    let texture = read_texture(texture_path);
+
+    for f in faces {
+        let p0 = Pt3 { 
+            x: vertices[((f.0).0 - 1)].0,
+            y: vertices[((f.0).0 - 1)].1,
+            z: vertices[((f.0).0 - 1)].2,
+        };
+        let p1 = Pt3 { 
+            x: vertices[((f.0).1 - 1)].0,
+            y: vertices[((f.0).1 - 1)].1,
+            z: vertices[((f.0).1 - 1)].2,
+        };
+        let p2 = Pt3 { 
+            x: vertices[((f.0).2 - 1)].0,
+            y: vertices[((f.0).2 - 1)].1,
+            z: vertices[((f.0).2 - 1)].2,
+        };
+
+        let u = (p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
+        let v = (p2.x - p0.x, p2.y - p0.y, p2.z - p0.z);
+        let mut norm = (
+            (u.1 * v.2 - u.2 * v.1),
+            (u.2 * v.0 - u.0 * v.2),
+            (u.0 * v.1 - u.1 * v.0));
+        let mag = (norm.0.powi(2) + norm.1.powi(2) + norm.2.powi(2)).sqrt();
+        norm.0 = norm.0 / mag;
+        norm.1 = norm.1 / mag;
+        norm.2 = norm.2 / mag;
+
+        // Add perspective
+        let c = 5.0;
+        let p0p = Pt3 { x: p0.x / (1.0 - p0.z / c), y: p0.y / (1.0 - p0.z / c), z: p0.z / (1.0 - p0.z / c)};
+        let p1p = Pt3 { x: p1.x / (1.0 - p1.z / c), y: p1.y / (1.0 - p1.z / c), z: p1.z / (1.0 - p1.z / c)};
+        let p2p = Pt3 { x: p2.x / (1.0 - p2.z / c), y: p2.y / (1.0 - p2.z / c), z: p2.z / (1.0 - p2.z / c)};
+
+        let p0s = world_to_screen(p0p, width, height);
+        let p1s = world_to_screen(p1p, width, height);
+        let p2s = world_to_screen(p2p, width, height);
+
+        // light direction is (0, 0, 1)
+        let light_insensity = 1.0 * norm.2;
+        // println!("light_insensity is {}", light_insensity);
+        if light_insensity > 0.0 {
+            let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
+            // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
+            let (ptx0, ptx1, ptx2) = (
+                Pt { x: (texture_vertices[vt0].0 * 1024.0) as i32, y: (texture_vertices[vt0].1 * 1024.0) as i32 },
+                Pt { x: (texture_vertices[vt1].0 * 1024.0) as i32, y: (texture_vertices[vt1].1 * 1024.0) as i32 },
+                Pt { x: (texture_vertices[vt2].0 * 1024.0) as i32, y: (texture_vertices[vt2].1 * 1024.0) as i32 });
+            triangle_with_zbuff_and_texture(
+                p0s,
+                p1s,
+                p2s,
+                ptx0,
+                ptx1,
+                ptx2,
+                img,
+                light_insensity,
+                &texture,
+                &mut zbuffer);
+        }
+    }
+}
+
 fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
     let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
@@ -164,14 +240,8 @@ fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mu
             z: vertices[((f.0).2 - 1)].2,
         };
 
-        let u = (
-            vertices[((f.0).1 - 1)].0 - vertices[((f.0).0 - 1)].0,
-            vertices[((f.0).1 - 1)].1 - vertices[((f.0).0 - 1)].1,
-            vertices[((f.0).1 - 1)].2 - vertices[((f.0).0 - 1)].2);
-        let v = (
-            vertices[((f.0).2 - 1)].0 - vertices[((f.0).0 - 1)].0,
-            vertices[((f.0).2 - 1)].1 - vertices[((f.0).0 - 1)].1,
-            vertices[((f.0).2 - 1)].2 - vertices[((f.0).0 - 1)].2);
+        let u = (p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
+        let v = (p2.x - p0.x, p2.y - p0.y, p2.z - p0.z);
         let mut norm = (
             (u.1 * v.2 - u.2 * v.1),
             (u.2 * v.0 - u.0 * v.2),
@@ -189,14 +259,6 @@ fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mu
         let light_insensity = 1.0 * norm.2;
         // println!("light_insensity is {}", light_insensity);
         if light_insensity > 0.0 {
-            // triangle_with_zbuff(
-            //     p0s,
-            //     p1s,
-            //     p2s,
-            //     img,
-            //     ((light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8),
-            //     &mut zbuffer);
-
             let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
             // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
             let (ptx0, ptx1, ptx2) = (
@@ -240,14 +302,8 @@ fn model_with_zbuffer(model_path: &str, img: &mut Img, width: f32, height: f32) 
             z: vertices[((f.0).2 - 1)].2,
         };
 
-        let u = (
-            vertices[((f.0).1 - 1)].0 - vertices[((f.0).0 - 1)].0,
-            vertices[((f.0).1 - 1)].1 - vertices[((f.0).0 - 1)].1,
-            vertices[((f.0).1 - 1)].2 - vertices[((f.0).0 - 1)].2);
-        let v = (
-            vertices[((f.0).2 - 1)].0 - vertices[((f.0).0 - 1)].0,
-            vertices[((f.0).2 - 1)].1 - vertices[((f.0).0 - 1)].1,
-            vertices[((f.0).2 - 1)].2 - vertices[((f.0).0 - 1)].2);
+        let u = (p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
+        let v = (p2.x - p0.x, p2.y - p0.y, p2.z - p0.z);
         let mut norm = (
             (u.1 * v.2 - u.2 * v.1),
             (u.2 * v.0 - u.0 * v.2),
