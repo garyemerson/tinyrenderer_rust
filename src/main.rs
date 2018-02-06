@@ -98,8 +98,8 @@ fn main() {
     // rasterize(Pt { x: 330, y: 463 }, Pt { x: 594, y: 200 }, &mut img, BLUE,  &mut ybuffer);
 
     // model_with_zbuffer(
-    //     "/Users/Garrett/Downloads/snapchat-dancing-hotdog-meme-whole-hotdog.stl.obj",
-    //     // "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
+    //     // "/Users/Garrett/Downloads/snapchat-dancing-hotdog-meme-whole-hotdog.stl.obj",
+    //     "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
     //     &mut img,
     //     width,
     //     height);
