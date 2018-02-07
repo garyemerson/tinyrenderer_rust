@@ -1,6 +1,7 @@
 extern crate regex;
 extern crate image;
 extern crate rand;
+extern crate nalgebra;
 
 mod img;
 use img::Img;
@@ -11,13 +12,22 @@ use regex::Regex;
 use std::io::BufRead;
 use std::mem;
 use std::fmt;
-use std::cmp::{min, max};
+use std::cmp;
 use rand::random;
 use std::f32;
 use image::DecodingResult::{U8, U16};
 use image::tga::TGADecoder;
 use image::{ImageDecoder, ImageBuffer, Rgb};
 use std::path::Path;
+use nalgebra::core::{Vector3, Vector2, Matrix3};
+
+
+fn max(x: f32, y: f32) -> f32 {
+    x.max(y)
+}
+fn min(x: f32, y: f32) -> f32 {
+    x.min(y)
+}
 
 #[derive(Clone, Copy)]
 struct Pt {
@@ -111,7 +121,14 @@ fn main() {
     //     width,
     //     height);
 
-    model_with_zbuffer_texture_perspective(
+    // model_with_zbuffer_texture_perspective(
+    //     "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
+    //     "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head_diffuse.tga",
+    //     &mut img,
+    //     width,
+    //     height);
+
+    model_with_zbuffer_and_perspective(
         "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
         "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head_diffuse.tga",
         &mut img,
@@ -122,12 +139,11 @@ fn main() {
     img.save("output.png");
 }
 
-fn world_to_screen(p: Pt3, width: f32, height: f32) -> Pt3 {
-    Pt3 {
-        x: ((p.x as f32 + 1.0) * width / 2.0 + 0.5),
-        y: ((p.y as f32 + 1.0) * height / 2.0 + 0.5),
-        z: p.z,
-    }
+fn world_to_screen(p: Vector3<f32>, width: f32, height: f32) -> Vector3<f32> {
+    Vector3::new(
+        ((p.x + 1.0) * width / 2.0 + 0.5),
+        ((p.y + 1.0) * height / 2.0 + 0.5),
+        p.z)
 }
 
 fn read_texture(path: &str) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
@@ -148,6 +164,64 @@ fn read_texture(path: &str) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
     texture
 }
 
+fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
+    let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
+    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    println!("{} texture vertices", texture_vertices.len());
+    let texture = read_texture(texture_path);
+
+    for f in faces {
+        let p0 = Vector3::new( 
+            vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).0 - 1)].2);
+        let p1 = Vector3::new(
+            vertices[((f.0).1 - 1)].0,
+            vertices[((f.0).1 - 1)].1,
+            vertices[((f.0).1 - 1)].2);
+        let p2 = Vector3::new(
+            vertices[((f.0).2 - 1)].0,
+            vertices[((f.0).2 - 1)].1,
+            vertices[((f.0).2 - 1)].2);
+
+        let u = p1 - p0;
+        let v = p2 - p0;
+        let normal = u.cross(&v).normalize();
+
+        // Add perspective
+        let c = 5.0;
+        let p0p = p0 / (1.0 - p0.z / c);
+        let p1p = p1 / (1.0 - p1.z / c);
+        let p2p = p2 / (1.0 - p2.z / c);
+
+        let p0s = world_to_screen(p0p, width, height);
+        let p1s = world_to_screen(p1p, width, height);
+        let p2s = world_to_screen(p2p, width, height);
+
+        // light direction is (0, 0, 1)
+        let light_insensity = 1.0 * normal.z;
+        // println!("light_insensity is {}", light_insensity);
+        if light_insensity > 0.0 {
+            let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
+            // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
+            let ptx0 = Vector2::new(texture_vertices[vt0].0 * 1024.0, texture_vertices[vt0].1 * 1024.0);
+            let ptx1 = Vector2::new(texture_vertices[vt1].0 * 1024.0, texture_vertices[vt1].1 * 1024.0);
+            let ptx2 = Vector2::new(texture_vertices[vt2].0 * 1024.0, texture_vertices[vt2].1 * 1024.0);
+            triangle_with_zbuff_and_texture(
+                p0s,
+                p1s,
+                p2s,
+                ptx0,
+                ptx1,
+                ptx2,
+                img,
+                light_insensity,
+                &texture,
+                &mut zbuffer);
+        }
+    }
+}
+
 fn model_with_zbuffer_texture_perspective(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
     let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
@@ -155,54 +229,43 @@ fn model_with_zbuffer_texture_perspective(model_path: &str, texture_path: &str, 
     let texture = read_texture(texture_path);
 
     for f in faces {
-        let p0 = Pt3 { 
-            x: vertices[((f.0).0 - 1)].0,
-            y: vertices[((f.0).0 - 1)].1,
-            z: vertices[((f.0).0 - 1)].2,
-        };
-        let p1 = Pt3 { 
-            x: vertices[((f.0).1 - 1)].0,
-            y: vertices[((f.0).1 - 1)].1,
-            z: vertices[((f.0).1 - 1)].2,
-        };
-        let p2 = Pt3 { 
-            x: vertices[((f.0).2 - 1)].0,
-            y: vertices[((f.0).2 - 1)].1,
-            z: vertices[((f.0).2 - 1)].2,
-        };
+        let p0 = Vector3::new( 
+            vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).0 - 1)].2);
+        let p1 = Vector3::new(
+            vertices[((f.0).1 - 1)].0,
+            vertices[((f.0).1 - 1)].1,
+            vertices[((f.0).1 - 1)].2);
+        let p2 = Vector3::new(
+            vertices[((f.0).2 - 1)].0,
+            vertices[((f.0).2 - 1)].1,
+            vertices[((f.0).2 - 1)].2);
 
-        let u = (p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
-        let v = (p2.x - p0.x, p2.y - p0.y, p2.z - p0.z);
-        let mut norm = (
-            (u.1 * v.2 - u.2 * v.1),
-            (u.2 * v.0 - u.0 * v.2),
-            (u.0 * v.1 - u.1 * v.0));
-        let mag = (norm.0.powi(2) + norm.1.powi(2) + norm.2.powi(2)).sqrt();
-        norm.0 = norm.0 / mag;
-        norm.1 = norm.1 / mag;
-        norm.2 = norm.2 / mag;
+        let u = p1 - p0;
+        let v = p2 - p0;
+        let normal = u.cross(&v).normalize();
 
         // Add perspective
         let c = 5.0;
-        let p0p = Pt3 { x: p0.x / (1.0 - p0.z / c), y: p0.y / (1.0 - p0.z / c), z: p0.z / (1.0 - p0.z / c)};
-        let p1p = Pt3 { x: p1.x / (1.0 - p1.z / c), y: p1.y / (1.0 - p1.z / c), z: p1.z / (1.0 - p1.z / c)};
-        let p2p = Pt3 { x: p2.x / (1.0 - p2.z / c), y: p2.y / (1.0 - p2.z / c), z: p2.z / (1.0 - p2.z / c)};
+        let p0p = p0 / (1.0 - p0.z / c);
+        let p1p = p1 / (1.0 - p1.z / c);
+        let p2p = p2 / (1.0 - p2.z / c);
 
         let p0s = world_to_screen(p0p, width, height);
         let p1s = world_to_screen(p1p, width, height);
         let p2s = world_to_screen(p2p, width, height);
 
         // light direction is (0, 0, 1)
-        let light_insensity = 1.0 * norm.2;
+        let light_insensity = 1.0 * normal.z;
         // println!("light_insensity is {}", light_insensity);
         if light_insensity > 0.0 {
             let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
             // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
-            let (ptx0, ptx1, ptx2) = (
-                Pt { x: (texture_vertices[vt0].0 * 1024.0) as i32, y: (texture_vertices[vt0].1 * 1024.0) as i32 },
-                Pt { x: (texture_vertices[vt1].0 * 1024.0) as i32, y: (texture_vertices[vt1].1 * 1024.0) as i32 },
-                Pt { x: (texture_vertices[vt2].0 * 1024.0) as i32, y: (texture_vertices[vt2].1 * 1024.0) as i32 });
-            triangle_with_zbuff_and_texture(
+            let ptx0 = Vector2::new(texture_vertices[vt0].0 * 1024.0, texture_vertices[vt0].1 * 1024.0);
+            let ptx1 = Vector2::new(texture_vertices[vt1].0 * 1024.0, texture_vertices[vt1].1 * 1024.0);
+            let ptx2 = Vector2::new(texture_vertices[vt2].0 * 1024.0, texture_vertices[vt2].1 * 1024.0);
+            triangle_with_zbuff_and_texture_old(
                 p0s,
                 p1s,
                 p2s,
@@ -224,48 +287,37 @@ fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mu
     let texture = read_texture(texture_path);
 
     for f in faces {
-        let p0 = Pt3 { 
-            x: vertices[((f.0).0 - 1)].0,
-            y: vertices[((f.0).0 - 1)].1,
-            z: vertices[((f.0).0 - 1)].2,
-        };
-        let p1 = Pt3 { 
-            x: vertices[((f.0).1 - 1)].0,
-            y: vertices[((f.0).1 - 1)].1,
-            z: vertices[((f.0).1 - 1)].2,
-        };
-        let p2 = Pt3 { 
-            x: vertices[((f.0).2 - 1)].0,
-            y: vertices[((f.0).2 - 1)].1,
-            z: vertices[((f.0).2 - 1)].2,
-        };
+        let p0 = Vector3::new( 
+            vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).0 - 1)].2);
+        let p1 = Vector3::new(
+            vertices[((f.0).1 - 1)].0,
+            vertices[((f.0).1 - 1)].1,
+            vertices[((f.0).1 - 1)].2);
+        let p2 = Vector3::new(
+            vertices[((f.0).2 - 1)].0,
+            vertices[((f.0).2 - 1)].1,
+            vertices[((f.0).2 - 1)].2);
 
-        let u = (p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
-        let v = (p2.x - p0.x, p2.y - p0.y, p2.z - p0.z);
-        let mut norm = (
-            (u.1 * v.2 - u.2 * v.1),
-            (u.2 * v.0 - u.0 * v.2),
-            (u.0 * v.1 - u.1 * v.0));
-        let mag = (norm.0.powi(2) + norm.1.powi(2) + norm.2.powi(2)).sqrt();
-        norm.0 = norm.0 / mag;
-        norm.1 = norm.1 / mag;
-        norm.2 = norm.2 / mag;
+        let u = p1 - p0;
+        let v = p2 - p0;
+        let normal = u.cross(&v).normalize();
 
         let p0s = world_to_screen(p0, width, height);
         let p1s = world_to_screen(p1, width, height);
         let p2s = world_to_screen(p2, width, height);
 
         // light direction is (0, 0, 1)
-        let light_insensity = 1.0 * norm.2;
+        let light_insensity = 1.0 * normal.z;
         // println!("light_insensity is {}", light_insensity);
         if light_insensity > 0.0 {
             let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
             // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
-            let (ptx0, ptx1, ptx2) = (
-                Pt { x: (texture_vertices[vt0].0 * 1024.0) as i32, y: (texture_vertices[vt0].1 * 1024.0) as i32 },
-                Pt { x: (texture_vertices[vt1].0 * 1024.0) as i32, y: (texture_vertices[vt1].1 * 1024.0) as i32 },
-                Pt { x: (texture_vertices[vt2].0 * 1024.0) as i32, y: (texture_vertices[vt2].1 * 1024.0) as i32 });
-            triangle_with_zbuff_and_texture(
+            let ptx0 = Vector2::new(texture_vertices[vt0].0 * 1024.0, texture_vertices[vt0].1 * 1024.0);
+            let ptx1 = Vector2::new(texture_vertices[vt1].0 * 1024.0, texture_vertices[vt1].1 * 1024.0);
+            let ptx2 = Vector2::new(texture_vertices[vt2].0 * 1024.0, texture_vertices[vt2].1 * 1024.0);
+            triangle_with_zbuff_and_texture_old(
                 p0s,
                 p1s,
                 p2s,
@@ -286,39 +338,29 @@ fn model_with_zbuffer(model_path: &str, img: &mut Img, width: f32, height: f32) 
     println!("{} vertices, {} faces", vertices.len(), faces.len());
 
     for f in faces {
-        let p0 = Pt3 { 
-            x: vertices[((f.0).0 - 1)].0,
-            y: vertices[((f.0).0 - 1)].1,
-            z: vertices[((f.0).0 - 1)].2,
-        };
-        let p1 = Pt3 { 
-            x: vertices[((f.0).1 - 1)].0,
-            y: vertices[((f.0).1 - 1)].1,
-            z: vertices[((f.0).1 - 1)].2,
-        };
-        let p2 = Pt3 { 
-            x: vertices[((f.0).2 - 1)].0,
-            y: vertices[((f.0).2 - 1)].1,
-            z: vertices[((f.0).2 - 1)].2,
-        };
+        let p0 = Vector3::new( 
+            vertices[((f.0).0 - 1)].0,
+            vertices[((f.0).0 - 1)].1,
+            vertices[((f.0).0 - 1)].2);
+        let p1 = Vector3::new(
+            vertices[((f.0).1 - 1)].0,
+            vertices[((f.0).1 - 1)].1,
+            vertices[((f.0).1 - 1)].2);
+        let p2 = Vector3::new(
+            vertices[((f.0).2 - 1)].0,
+            vertices[((f.0).2 - 1)].1,
+            vertices[((f.0).2 - 1)].2);
 
-        let u = (p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
-        let v = (p2.x - p0.x, p2.y - p0.y, p2.z - p0.z);
-        let mut norm = (
-            (u.1 * v.2 - u.2 * v.1),
-            (u.2 * v.0 - u.0 * v.2),
-            (u.0 * v.1 - u.1 * v.0));
-        let mag = (norm.0.powi(2) + norm.1.powi(2) + norm.2.powi(2)).sqrt();
-        norm.0 = norm.0 / mag;
-        norm.1 = norm.1 / mag;
-        norm.2 = norm.2 / mag;
+        let u = p1 - p0;
+        let v = p2 - p0;
+        let normal = u.cross(&v).normalize();
 
         let p0s = world_to_screen(p0, width, height);
         let p1s = world_to_screen(p1, width, height);
         let p2s = world_to_screen(p2, width, height);
 
         // light direction is (0, 0, 1)
-        let light_insensity = 1.0 * norm.2;
+        let light_insensity = 1.0 * normal.z;
         // println!("light_insensity is {}", light_insensity);
         if light_insensity > 0.0 {
             // triangle_with_zbuff(
@@ -341,23 +383,23 @@ fn model_with_zbuffer(model_path: &str, img: &mut Img, width: f32, height: f32) 
 }
 
 fn triangle_with_zbuff_and_texture(
-    p0: Pt3,
-    p1: Pt3,
-    p2: Pt3,
-    ptx0: Pt,
-    ptx1: Pt,
-    ptx2: Pt,
+    p0: Vector3<f32>,
+    p1: Vector3<f32>,
+    p2: Vector3<f32>,
+    ptx0: Vector2<f32>,
+    ptx1: Vector2<f32>,
+    ptx2: Vector2<f32>,
     img: &mut Img,
     light_insensity: f32,
     texture: &ImageBuffer<Rgb<u8>, Vec<u8>>,
     zbuffer: &mut Vec<Vec<f32>>)
 {
-    let bb_up_right = Pt { x: max(p0.x as i32, max(p1.x as i32, p2.x as i32)), y: max(0, min(p0.y as i32, min(p1.y as i32, p2.y as i32))) };
-    let bb_lower_left = Pt { x: max(0, min(p0.x as i32, min(p1.x as i32, p2.x as i32))), y: max(p0.y as i32, max(p1.y as i32, p2.y as i32)) };
+    let bb_up_right = Vector2::<i32>::new(max(p0.x, max(p1.x, p2.x)) as i32, max(0.0, min(p0.y, min(p1.y, p2.y))) as i32);
+    let bb_lower_left = Vector2::<i32>::new(max(0.0, min(p0.x, min(p1.x, p2.x))) as i32, max(p0.y, max(p1.y, p2.y)) as i32);
 
     for x in bb_lower_left.x..(bb_up_right.x + 1) {
         for y in bb_up_right.y..(bb_lower_left.y + 1) {
-            let bary = barycentric(Pt { x, y }, (p0.pt2(), p1.pt2(), p2.pt2()));
+            let bary = barycentric(Vector2::new(x as f32, y as f32), (p0.remove_row(2), p1.remove_row(2), p2.remove_row(2)));
 
             if bary.0 >= 0.0 && bary.1 >= 0.0 && bary.2 >= 0.0 {
                 // ???: How is this the z coord
@@ -370,7 +412,52 @@ fn triangle_with_zbuff_and_texture(
                     (ptx0, ptx1, ptx2),
                     bary);
                 // texture pixel to use
-                let tpx = texture.get_pixel(tcoord.x as u32, (1024 - tcoord.y) as u32);
+                let tpx = texture.get_pixel(tcoord.x as u32, (1024.0 - tcoord.y) as u32);
+                let color = (
+                    (tpx[0] as f32 * light_insensity) as u8,
+                    (tpx[1] as f32 * light_insensity) as u8,
+                    (tpx[2] as f32 * light_insensity) as u8);
+
+                if zbuffer[x as usize][y as usize] < z {
+                    zbuffer[x as usize][y as usize] = z;
+                    img.set(x as u32, y as u32, color);
+                }
+            }
+        }
+    }
+}
+
+fn triangle_with_zbuff_and_texture_old(
+    p0: Vector3<f32>,
+    p1: Vector3<f32>,
+    p2: Vector3<f32>,
+    ptx0: Vector2<f32>,
+    ptx1: Vector2<f32>,
+    ptx2: Vector2<f32>,
+    img: &mut Img,
+    light_insensity: f32,
+    texture: &ImageBuffer<Rgb<u8>, Vec<u8>>,
+    zbuffer: &mut Vec<Vec<f32>>)
+{
+    let bb_up_right = Vector2::<i32>::new(max(p0.x, max(p1.x, p2.x)) as i32, max(0.0, min(p0.y, min(p1.y, p2.y))) as i32);
+    let bb_lower_left = Vector2::<i32>::new(max(0.0, min(p0.x, min(p1.x, p2.x))) as i32, max(p0.y, max(p1.y, p2.y)) as i32);
+
+    for x in bb_lower_left.x..(bb_up_right.x + 1) {
+        for y in bb_up_right.y..(bb_lower_left.y + 1) {
+            let bary = barycentric(Vector2::new(x as f32, y as f32), (p0.remove_row(2), p1.remove_row(2), p2.remove_row(2)));
+
+            if bary.0 >= 0.0 && bary.1 >= 0.0 && bary.2 >= 0.0 {
+                // ???: How is this the z coord
+                let mut z = p0.z as f32 * bary.0
+                    + p1.z as f32 * bary.1
+                    + p2.z as f32 * bary.2;
+
+                // coordinate in the texture
+                let tcoord = bary_to_cart(
+                    (ptx0, ptx1, ptx2),
+                    bary);
+                // texture pixel to use
+                let tpx = texture.get_pixel(tcoord.x as u32, (1024.0 - tcoord.y) as u32);
                 let color = (
                     (tpx[0] as f32 * light_insensity) as u8,
                     (tpx[1] as f32 * light_insensity) as u8,
@@ -386,19 +473,19 @@ fn triangle_with_zbuff_and_texture(
 }
 
 fn triangle_with_zbuff(
-    p0: Pt3,
-    p1: Pt3,
-    p2: Pt3,
+    p0: Vector3<f32>,
+    p1: Vector3<f32>,
+    p2: Vector3<f32>,
     img: &mut Img,
     color: (u8, u8, u8),
     zbuffer: &mut Vec<Vec<f32>>)
 {
-    let bb_up_right = Pt { x: max(p0.x as i32, max(p1.x as i32, p2.x as i32)), y: max(0, min(p0.y as i32, min(p1.y as i32, p2.y as i32))) };
-    let bb_lower_left = Pt { x: max(0, min(p0.x as i32, min(p1.x as i32, p2.x as i32))), y: max(p0.y as i32, max(p1.y as i32, p2.y as i32)) };
+    let bb_up_right = Vector2::<i32>::new(max(p0.x, max(p1.x, p2.x)) as i32, max(0.0, min(p0.y, min(p1.y, p2.y))) as i32);
+    let bb_lower_left = Vector2::<i32>::new(max(0.0, min(p0.x, min(p1.x, p2.x))) as i32, max(p0.y, max(p1.y, p2.y)) as i32);
 
     for x in bb_lower_left.x..(bb_up_right.x + 1) {
         for y in bb_up_right.y..(bb_lower_left.y + 1) {
-            let bary = barycentric(Pt { x, y }, (p0.pt2(), p1.pt2(), p2.pt2()));
+            let bary = barycentric(Vector2::new(x as f32, y as f32), (p0.remove_row(2), p1.remove_row(2), p2.remove_row(2)));
 
             if bary.0 >= 0.0 && bary.1 >= 0.0 && bary.2 >= 0.0 {
                 // ???: How is this the z coord
@@ -510,31 +597,32 @@ fn triangle_exercises(img: &mut Img) {
     draw_triangle3(t[0], t[1], t[2], img, RED); 
 }
 
-fn bary_to_cart(t: (Pt, Pt, Pt), b: (f32, f32, f32)) -> Pt {
-    let p = (
-        b.0 * t.0.x as f32 + b.1 * t.1.x as f32 + b.2 * t.2.x as f32,
-        b.0 * t.0.y as f32 + b.1 * t.1.y as f32 + b.2 * t.2.y as f32);
-    Pt { x: p.0 as i32, y: p.1 as i32 }
+fn bary_to_cart(t: (Vector2<f32>, Vector2<f32>, Vector2<f32>), b: (f32, f32, f32)) -> Vector2<f32> {
+    Vector2::new(
+        b.0 * t.0.x  + b.1 * t.1.x  + b.2 * t.2.x,
+        b.0 * t.0.y  + b.1 * t.1.y  + b.2 * t.2.y)
 }
 
-fn barycentric(p: Pt, t: (Pt, Pt, Pt)) -> (f32, f32, f32) {
-    let b1 = ((t.1.y - t.2.y) * (p.x - t.2.x) + (t.2.x - t.1.x) * (p.y - t.2.y)) as f32 /
-        ((t.1.y - t.2.y) * (t.0.x - t.2.x) + (t.2.x - t.1.x) * (t.0.y - t.2.y)) as f32;
+fn barycentric(p: Vector2<f32>, t: (Vector2<f32>, Vector2<f32>, Vector2<f32>)) -> (f32, f32, f32) {
+    let b1 = ((t.1.y - t.2.y) * (p.x - t.2.x) + (t.2.x - t.1.x) * (p.y - t.2.y)) /
+        ((t.1.y - t.2.y) * (t.0.x - t.2.x) + (t.2.x - t.1.x) * (t.0.y - t.2.y));
 
-    let b2 = ((t.2.y - t.0.y) * (p.x - t.2.x) + (t.0.x - t.2.x) * (p.y - t.2.y)) as f32 /
-        ((t.1.y - t.2.y) * (t.0.x - t.2.x) + (t.2.x - t.1.x) * (t.0.y - t.2.y)) as f32;
+    let b2 = ((t.2.y - t.0.y) * (p.x - t.2.x) + (t.0.x - t.2.x) * (p.y - t.2.y)) /
+        ((t.1.y - t.2.y) * (t.0.x - t.2.x) + (t.2.x - t.1.x) * (t.0.y - t.2.y));
 
     let b3 = 1.0 - b1 - b2;
     (b1, b2, b3)
 }
 fn inside_triangle(p: Pt, t: (Pt, Pt, Pt)) -> bool {
-    let b = barycentric(p, t);
+    let p2 = Vector2::new(p.x as f32, p.y as f32);
+    let t2 = (Vector2::new(t.0.x as f32, t.0.y as f32), Vector2::new(t.1.x as f32, t.1.y as f32), Vector2::new(t.2.x as f32, t.2.y as f32));
+    let b = barycentric(p2, t2);
     b.0 >= 0.0 && b.1 >= 0.0 && b.2 >= 0.0
 }
 fn draw_triangle3(p0: Pt, p1: Pt, p2: Pt, img: &mut Img, color: (u8, u8, u8)) {
     // bounding box points
-    let bb_up_right = Pt { x: max(p0.x, max(p1.x, p2.x)), y: min(p0.y, min(p1.y, p2.y)) };
-    let bb_lower_left = Pt { x: min(p0.x, min(p1.x, p2.x)), y: max(p0.y, max(p1.y, p2.y)) };
+    let bb_up_right = Pt { x: cmp::max(p0.x, cmp::max(p1.x, p2.x)), y: cmp::min(p0.y, cmp::min(p1.y, p2.y)) };
+    let bb_lower_left = Pt { x: cmp::min(p0.x, cmp::min(p1.x, p2.x)), y: cmp::max(p0.y, cmp::max(p1.y, p2.y)) };
 
     for x in bb_lower_left.x..(bb_up_right.x + 1) {
         for y in bb_up_right.y..(bb_lower_left.y + 1) {

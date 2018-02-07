@@ -7,3 +7,4 @@ authors = ["garyemerson <gmohammadioun@gmail.com>"]
 image = "0.18.0"
 regex = "0.2.5"
 rand = "0.4"
+nalgebra = "0.14.0"
