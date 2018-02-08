@@ -19,7 +19,10 @@ use image::DecodingResult::{U8, U16};
 use image::tga::TGADecoder;
 use image::{ImageDecoder, ImageBuffer, Rgb};
 use std::path::Path;
-use nalgebra::core::{Vector3, Vector2, Matrix3};
+use nalgebra::core::{Vector3, Vector2, Vector4, Matrix3, Matrix4};
+use nalgebra::core::dimension::{U3};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 
 fn max(x: f32, y: f32) -> f32 {
@@ -164,25 +167,51 @@ fn read_texture(path: &str) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
     texture
 }
 
+fn lookat(eye: Vector3<f32>, center: Vector3<f32>, up: Vector3<f32>) -> Matrix4<f32> {
+    let z = (eye - center).normalize();
+    let x = up.cross(&z).normalize();
+    let y = z.cross(&x).normalize();
+
+    let m = Matrix4::new(
+        x.x, x.y, x.z, 0.0,
+        y.x, y.y, y.z, 0.0,
+        z.x, z.y, z.z, 0.0,
+        0.0, 0.0, 0.0, 1.0);
+    let t = Matrix4::new(
+        1.0, 0.0, 0.0, -1.0 * center[0],
+        0.0, 1.0, 0.0, -1.0 * center[1],
+        0.0, 0.0, 1.0, -1.0 * center[2],
+        0.0, 0.0, 0.0, 1.0);
+    m * t
+}
+
+
 fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
-    let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
+    // let mut zbuffer = vec![vec![-f32::MAX; (height + 20.0) as usize]; (width + 20.0) as usize];
+    let mut zbuffer: HashMap<(i32, i32), f32> = HashMap::new();
     let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
     println!("{} texture vertices", texture_vertices.len());
     let texture = read_texture(texture_path);
 
     for f in faces {
-        let p0 = Vector3::new( 
+        let mut p0 = Vector3::new( 
             vertices[((f.0).0 - 1)].0,
             vertices[((f.0).0 - 1)].1,
             vertices[((f.0).0 - 1)].2);
-        let p1 = Vector3::new(
+        let mut p1 = Vector3::new(
             vertices[((f.0).1 - 1)].0,
             vertices[((f.0).1 - 1)].1,
             vertices[((f.0).1 - 1)].2);
-        let p2 = Vector3::new(
+        let mut p2 = Vector3::new(
             vertices[((f.0).2 - 1)].0,
             vertices[((f.0).2 - 1)].1,
             vertices[((f.0).2 - 1)].2);
+
+        // eye, center, up
+        let model_view = lookat(Vector3::new(0.0, 0.0, 1.0), Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0));
+        let p0 = Vector3::from_homogeneous(model_view * p0.to_homogeneous()).unwrap();
+        let p1 = Vector3::from_homogeneous(model_view * p1.to_homogeneous()).unwrap();
+        let p2 = Vector3::from_homogeneous(model_view * p2.to_homogeneous()).unwrap();
 
         let u = p1 - p0;
         let v = p2 - p0;
@@ -190,6 +219,11 @@ fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img:
 
         // Add perspective
         let c = 5.0;
+        // let project = Matrix4::new(
+        //     1.0, 0.0, 0.0, 0.0,
+        //     0.0, 1.0, 0.0, 0.0,
+        //     0.0, 0.0, 1.0, 0.0,
+        //     0.0, 0.0, -1.0 / c, 1.0);
         let p0p = p0 / (1.0 - p0.z / c);
         let p1p = p1 / (1.0 - p1.z / c);
         let p2p = p2 / (1.0 - p2.z / c);
@@ -392,7 +426,7 @@ fn triangle_with_zbuff_and_texture(
     img: &mut Img,
     light_insensity: f32,
     texture: &ImageBuffer<Rgb<u8>, Vec<u8>>,
-    zbuffer: &mut Vec<Vec<f32>>)
+    zbuffer: &mut HashMap<(i32, i32), f32>)
 {
     let bb_up_right = Vector2::<i32>::new(max(p0.x, max(p1.x, p2.x)) as i32, max(0.0, min(p0.y, min(p1.y, p2.y))) as i32);
     let bb_lower_left = Vector2::<i32>::new(max(0.0, min(p0.x, min(p1.x, p2.x))) as i32, max(p0.y, max(p1.y, p2.y)) as i32);
@@ -418,9 +452,18 @@ fn triangle_with_zbuff_and_texture(
                     (tpx[1] as f32 * light_insensity) as u8,
                     (tpx[2] as f32 * light_insensity) as u8);
 
-                if zbuffer[x as usize][y as usize] < z {
-                    zbuffer[x as usize][y as usize] = z;
-                    img.set(x as u32, y as u32, color);
+                match zbuffer.entry((x as i32, y as i32)) {
+                    Occupied(mut e) => {
+                        let mut val = e.get_mut();
+                        if *val < z {
+                            *val = z;
+                            img.set(x as u32, y as u32, color);
+                        }
+                    },
+                    Vacant(e) => {
+                        e.insert(z);
+                        img.set(x as u32, y as u32, color);
+                    }
                 }
             }
         }
