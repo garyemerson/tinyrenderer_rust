@@ -2,6 +2,7 @@ extern crate regex;
 extern crate image;
 extern crate rand;
 extern crate nalgebra;
+extern crate cgmath;
 
 mod img;
 use img::Img;
@@ -19,10 +20,13 @@ use image::DecodingResult::{U8, U16};
 use image::tga::TGADecoder;
 use image::{ImageDecoder, ImageBuffer, Rgb};
 use std::path::Path;
+use nalgebra::geometry::Point3;
 use nalgebra::core::{Vector3, Vector2, Vector4, Matrix3, Matrix4};
 use nalgebra::core::dimension::{U3};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
+use nalgebra::inverse;
+use cgmath::{SquareMatrix, Matrix};
 
 
 fn max(x: f32, y: f32) -> f32 {
@@ -68,6 +72,13 @@ const BLUE: (u8, u8, u8) = (0, 0, 255);
 fn main() {
     let (width, height): (f32, f32) = (800.0, 800.0);
     let mut img = Img::new(width as u32, height as u32);
+
+    let m = Matrix4::new(
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1);
+    // println!("m is {}, m inverse is {}", m, nalgebra::inverse(&m));
 
     // line_benchmark(&mut img);
     // draw_wireframe("/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj", &mut img, width, height);
@@ -189,48 +200,88 @@ fn lookat(eye: Vector3<f32>, center: Vector3<f32>, up: Vector3<f32>) -> Matrix4<
 fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
     // let mut zbuffer = vec![vec![-f32::MAX; (height + 20.0) as usize]; (width + 20.0) as usize];
     let mut zbuffer: HashMap<(i32, i32), f32> = HashMap::new();
-    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    let (vertices, faces, texture_vertices, vertice_normals) = parse_obj_file(model_path);
     println!("{} texture vertices", texture_vertices.len());
     let texture = read_texture(texture_path);
 
-    for f in faces {
-        let mut p0 = Vector3::new( 
+    // eye, center, up
+    let model_view = lookat(Vector3::new(0.5, 0.25, 1.0), Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0));
+    // Add perspective
+    let c = 5.0;
+    let project = Matrix4::new(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, -1.0 / c, 1.0);
+    // viewport matrix
+    let (x, y, d) = (0.0, 0.0, 255.0);
+    let viewport = Matrix4::new(
+        width / 2.0, 0.0, 0.0, x + width / 2.0,
+        0.0, height / 2.0, 0.0, y + height / 2.0,
+        0.0, 0.0, d / 2.0, d / 2.0,
+        0.0, 0.0, 0.0, 1.0);
+    // final matrix
+    let m = viewport * project * model_view;
+
+    let temp = (project * model_view).iter().map(|x| *x).collect::<Vec<f32>>();
+    let mut m2 = cgmath::Matrix4::new(
+        temp[0], temp[1], temp[2], temp[3],
+        temp[4], temp[5], temp[6], temp[7],
+        temp[8], temp[9], temp[10], temp[11],
+        temp[12], temp[13], temp[14], temp[15]);
+    println!("m2 is {:?}", m2);
+    m2 = m2.transpose().invert().unwrap();
+    println!("inverted m2 is {:?}", m2);
+    let m2 = Matrix4::new(
+        m2.x.x, m2.y.x, m2.z.x, m2.w.z,
+        m2.x.y, m2.y.y, m2.z.y, m2.w.y,
+        m2.x.z, m2.y.z, m2.z.z, m2.w.z,
+        m2.x.w, m2.y.w, m2.z.w, m2.w.w);
+
+
+    for (i, f) in faces.iter().enumerate() {
+        // println!("processing face {}: {:?}", i, f);
+        let p0 = Point3::new( 
             vertices[((f.0).0 - 1)].0,
             vertices[((f.0).0 - 1)].1,
             vertices[((f.0).0 - 1)].2);
-        let mut p1 = Vector3::new(
+        let p1 = Point3::new(
             vertices[((f.0).1 - 1)].0,
             vertices[((f.0).1 - 1)].1,
             vertices[((f.0).1 - 1)].2);
-        let mut p2 = Vector3::new(
+        let p2 = Point3::new(
             vertices[((f.0).2 - 1)].0,
             vertices[((f.0).2 - 1)].1,
             vertices[((f.0).2 - 1)].2);
 
-        // eye, center, up
-        let model_view = lookat(Vector3::new(0.0, 0.0, 1.0), Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0));
-        let p0 = Vector3::from_homogeneous(model_view * p0.to_homogeneous()).unwrap();
-        let p1 = Vector3::from_homogeneous(model_view * p1.to_homogeneous()).unwrap();
-        let p2 = Vector3::from_homogeneous(model_view * p2.to_homogeneous()).unwrap();
+        let vn0 = Vector3::new( 
+            vertice_normals[((f.0).0 - 1)].0,
+            vertice_normals[((f.0).0 - 1)].1,
+            vertice_normals[((f.0).0 - 1)].2);
+        let vn1 = Vector3::new(
+            vertice_normals[((f.0).1 - 1)].0,
+            vertice_normals[((f.0).1 - 1)].1,
+            vertice_normals[((f.0).1 - 1)].2);
+        let vn2 = Vector3::new(
+            vertice_normals[((f.0).2 - 1)].0,
+            vertice_normals[((f.0).2 - 1)].1,
+            vertice_normals[((f.0).2 - 1)].2);
+
+        let p0 = Point3::from_homogeneous(m * p0.to_homogeneous()).unwrap();
+        let p1 = Point3::from_homogeneous(m * p1.to_homogeneous()).unwrap();
+        let p2 = Point3::from_homogeneous(m * p2.to_homogeneous()).unwrap();
+
+        // println!("m2 is {}", m2);
+        // println!("vn0 is {}, m2 * vn0 is {}", vn0, m2 * vn0.to_homogeneous());
+        // println!("vn1 is {}, m2 * vn1 is {}", vn1, m2 * vn1.to_homogeneous());
+        // println!("vn2 is {}, m2 * vn2 is {}", vn2, m2 * vn2.to_homogeneous());
+        let vn0 = Vector3::from_homogeneous(m2 * vn0.to_homogeneous()).unwrap().normalize();
+        let vn1 = Vector3::from_homogeneous(m2 * vn1.to_homogeneous()).unwrap().normalize();
+        let vn2 = Vector3::from_homogeneous(m2 * vn2.to_homogeneous()).unwrap().normalize();
 
         let u = p1 - p0;
         let v = p2 - p0;
         let normal = u.cross(&v).normalize();
-
-        // Add perspective
-        let c = 5.0;
-        // let project = Matrix4::new(
-        //     1.0, 0.0, 0.0, 0.0,
-        //     0.0, 1.0, 0.0, 0.0,
-        //     0.0, 0.0, 1.0, 0.0,
-        //     0.0, 0.0, -1.0 / c, 1.0);
-        let p0p = p0 / (1.0 - p0.z / c);
-        let p1p = p1 / (1.0 - p1.z / c);
-        let p2p = p2 / (1.0 - p2.z / c);
-
-        let p0s = world_to_screen(p0p, width, height);
-        let p1s = world_to_screen(p1p, width, height);
-        let p2s = world_to_screen(p2p, width, height);
 
         // light direction is (0, 0, 1)
         let light_insensity = 1.0 * normal.z;
@@ -238,16 +289,24 @@ fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img:
         if light_insensity > 0.0 {
             let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
             // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
-            let ptx0 = Vector2::new(texture_vertices[vt0].0 * 1024.0, texture_vertices[vt0].1 * 1024.0);
-            let ptx1 = Vector2::new(texture_vertices[vt1].0 * 1024.0, texture_vertices[vt1].1 * 1024.0);
-            let ptx2 = Vector2::new(texture_vertices[vt2].0 * 1024.0, texture_vertices[vt2].1 * 1024.0);
+
+            // let ptx0 = Vector2::new(texture_vertices[vt0].0 * 1024.0, texture_vertices[vt0].1 * 1024.0);
+            // let ptx1 = Vector2::new(texture_vertices[vt1].0 * 1024.0, texture_vertices[vt1].1 * 1024.0);
+            // let ptx2 = Vector2::new(texture_vertices[vt2].0 * 1024.0, texture_vertices[vt2].1 * 1024.0);
+
+            // light direction is (0, 0, 1)
+            let li0 = 1.0 * vn0.z;
+            let li1 = 1.0 * vn1.z;
+            let li2 = 1.0 * vn2.z;
+
+            // println!("point coords: {:?}, {:?}, {:?}", p0.coords, p1.coords, p2.coords);
             triangle_with_zbuff_and_texture(
-                p0s,
-                p1s,
-                p2s,
-                ptx0,
-                ptx1,
-                ptx2,
+                p0.coords,
+                p1.coords,
+                p2.coords,
+                li0,
+                li1,
+                li2,
                 img,
                 light_insensity,
                 &texture,
@@ -258,7 +317,7 @@ fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img:
 
 fn model_with_zbuffer_texture_perspective(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
-    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    let (vertices, faces, texture_vertices, _) = parse_obj_file(model_path);
     println!("{} texture vertices", texture_vertices.len());
     let texture = read_texture(texture_path);
 
@@ -316,7 +375,7 @@ fn model_with_zbuffer_texture_perspective(model_path: &str, texture_path: &str, 
 
 fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
-    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    let (vertices, faces, texture_vertices, _) = parse_obj_file(model_path);
     println!("{} texture vertices", texture_vertices.len());
     let texture = read_texture(texture_path);
 
@@ -368,7 +427,7 @@ fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mu
 
 fn model_with_zbuffer(model_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
-    let (vertices, faces, texture_vertices) = parse_obj_file(model_path);
+    let (vertices, faces, texture_vertices, _) = parse_obj_file(model_path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
 
     for f in faces {
@@ -420,9 +479,9 @@ fn triangle_with_zbuff_and_texture(
     p0: Vector3<f32>,
     p1: Vector3<f32>,
     p2: Vector3<f32>,
-    ptx0: Vector2<f32>,
-    ptx1: Vector2<f32>,
-    ptx2: Vector2<f32>,
+    li0: f32,
+    li1: f32,
+    li2: f32,
     img: &mut Img,
     light_insensity: f32,
     texture: &ImageBuffer<Rgb<u8>, Vec<u8>>,
@@ -441,28 +500,43 @@ fn triangle_with_zbuff_and_texture(
                     + p1.z as f32 * bary.1
                     + p2.z as f32 * bary.2;
 
-                // coordinate in the texture
-                let tcoord = bary_to_cart(
-                    (ptx0, ptx1, ptx2),
-                    bary);
-                // texture pixel to use
-                let tpx = texture.get_pixel(tcoord.x as u32, (1024.0 - tcoord.y) as u32);
-                let color = (
-                    (tpx[0] as f32 * light_insensity) as u8,
-                    (tpx[1] as f32 * light_insensity) as u8,
-                    (tpx[2] as f32 * light_insensity) as u8);
+                // // coordinate in the texture
+                // let tcoord = bary_to_cart(
+                //     (ptx0, ptx1, ptx2),
+                //     bary);
+                // // texture pixel to use
+                // let tpx = texture.get_pixel(tcoord.x as u32, (1024.0 - tcoord.y) as u32);
+                // let color = (
+                //     (tpx[0] as f32 * light_insensity) as u8,
+                //     (tpx[1] as f32 * light_insensity) as u8,
+                //     (tpx[2] as f32 * light_insensity) as u8);
+
+                let mut light_insensity = li0 * bary.0 + li1 * bary.1 + li2 * bary.2;
+                // Not sure how some of li params are negative but there are so protect against
+                // negative light_insensity
+                if light_insensity < 0.0 {
+                    light_insensity = 0.0;
+                }
+                // light_insensity = (f32::sin((light_insensity - 1.0) * f32::consts::PI/2.0) + 1.0) / 2.0;
+
 
                 match zbuffer.entry((x as i32, y as i32)) {
                     Occupied(mut e) => {
                         let mut val = e.get_mut();
                         if *val < z {
                             *val = z;
-                            img.set(x as u32, y as u32, color);
+                            img.set(
+                                x as u32,
+                                y as u32,
+                                ((light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8));
                         }
                     },
                     Vacant(e) => {
                         e.insert(z);
-                        img.set(x as u32, y as u32, color);
+                        img.set(
+                            x as u32,
+                            y as u32,
+                            ((light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8));
                     }
                 }
             }
@@ -559,7 +633,7 @@ fn rasterize(mut p0: Pt, mut p1: Pt, img: &mut Img, color: (u8, u8, u8), ybuffer
 }
 
 fn lit_triangle_model(path: &str, img: &mut Img, width: f32, height: f32) {
-    let (vertices, faces, _) = parse_obj_file(path);
+    let (vertices, faces, _, _) = parse_obj_file(path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
 
     for f in faces {
@@ -607,7 +681,7 @@ fn lit_triangle_model(path: &str, img: &mut Img, width: f32, height: f32) {
 }
 
 fn rand_triangle_model(path: &str, img: &mut Img, width: f32, height: f32) {
-    let (vertices, faces, _) = parse_obj_file(path);
+    let (vertices, faces, _, _) = parse_obj_file(path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
 
     for f in faces {
@@ -734,7 +808,7 @@ fn line_benchmark(img: &mut Img) {
 }
 
 fn draw_wireframe(path: &str, img: &mut Img, width: f32, height: f32) {
-    let (vertices, faces, _) = parse_obj_file(path);
+    let (vertices, faces, _, _) = parse_obj_file(path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
     for f in faces {
         line4(
@@ -861,7 +935,8 @@ fn line(x0: u32, y0: u32, x1: u32, y1: u32, img: &mut Img, color: (u8, u8, u8)) 
 fn parse_obj_file(path: &str) -> (
     Vec<(f32, f32, f32)>,
     Vec<((usize, usize, usize), (usize, usize, usize))>,
-    Vec<(f32, f32)>)
+    Vec<(f32, f32)>,
+    Vec<(f32, f32, f32)>)
 {
     let f = File::open(path).unwrap();
     let buffer = BufReader::new(f);
@@ -869,10 +944,12 @@ fn parse_obj_file(path: &str) -> (
     let mut vertices = Vec::new();
     let mut faces = Vec::new();
     let mut texture_vertices = Vec::new();
+    let mut vertice_normals = Vec::new();
 
     let vre = Regex::new(r"v\s+([\d\-\.e]+)\s+([\d\-\.e]+)\s+([\d\-\.e]+)").unwrap();
     let fre = Regex::new(r"f\s+(\d*)/(\d*)[^ ]+\s+(\d*)/(\d*)[^ ]+\s+(\d*)/(\d*)[^ ]+").unwrap();
     let tre = Regex::new(r"vt\s+([\d\-\.e]+)\s+([\d\-\.e]+)").unwrap();
+    let vnre = Regex::new(r"vn\s+([\d\-\.e]+)\s+([\d\-\.e]+)\s+([\d\-\.e]+)").unwrap();
 
     for l in buffer.lines() {
         let l = l.unwrap();
@@ -903,8 +980,16 @@ fn parse_obj_file(path: &str) -> (
                 let vt = (vt1.parse::<f32>().unwrap(), vt2.parse::<f32>().unwrap());
                 texture_vertices.push(vt);
             }
+        } else if l.starts_with("vn ") {
+            for cap in vnre.captures_iter(&l) {
+                let vn1 = &cap[1].trim();
+                let vn2 = &cap[2].trim();
+                let vn3 = &cap[3].trim();
+                let vn = (vn1.parse::<f32>().unwrap(), vn2.parse::<f32>().unwrap(), vn3.parse::<f32>().unwrap());
+                vertice_normals.push(vn);
+            }
         }
     }
 
-    (vertices, faces, texture_vertices)
+    (vertices, faces, texture_vertices, vertice_normals)
 }
