@@ -1,6 +1,25 @@
 #![allow(dead_code)]
 
+use std::mem;
+use std::io::BufRead;
+
 use super::*;
+
+#[derive(Clone, Copy)]
+struct Pt {
+    x: i32,
+    y: i32,
+}
+impl From<Vector2<f32>> for Pt {
+    fn from(v: Vector2<f32>) -> Pt {
+        Pt { x: v.x as i32, y: v.y as i32 }
+    }
+}
+impl fmt::Display for Pt {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({}, {})", self.x, self.y)
+    }
+}
 
 fn run_model_with_zbuffer() {
     let (width, height): (f32, f32) = (800.0, 800.0);
@@ -281,7 +300,7 @@ fn model_with_zbuffer_and_texture(model_path: &str, texture_path: &str, img: &mu
 
 fn model_with_zbuffer(model_path: &str, img: &mut Img, width: f32, height: f32) {
     let mut zbuffer = vec![vec![-f32::MAX; (height + 1.0) as usize]; (width + 1.0) as usize];
-    let (vertices, faces, texture_vertices, _) = parse_obj_file(model_path);
+    let (vertices, faces, _, _) = parse_obj_file(model_path);
     println!("{} vertices, {} faces", vertices.len(), faces.len());
 
     for f in faces {
