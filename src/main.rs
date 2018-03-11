@@ -8,7 +8,10 @@ mod img;
 mod our_gl;
 mod old;
 mod model;
+
 use img::Img;
+use our_gl::{Shader, triangle};
+// use old::*;
 
 use std::io::BufReader;
 use std::fs::File;
@@ -19,7 +22,7 @@ use image::DecodingResult::{U8, U16};
 use image::tga::TGADecoder;
 use image::{ImageDecoder, ImageBuffer, Rgb};
 use nalgebra::geometry::Point3;
-use nalgebra::core::{Vector3, Vector2, Matrix4};
+use nalgebra::core::{Vector2, Vector3, Vector4, Matrix4, Matrix2x3};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use cgmath::{SquareMatrix};
@@ -39,30 +42,77 @@ const GREEN: (u8, u8, u8) = (0, 255, 0);
 const BLUE: (u8, u8, u8) = (0, 0, 255);
 
 fn main() {
-    run_model_with_zbuffer_and_perspective();
+    render_model_with_shaders();
 }
 
-fn run_model_with_zbuffer_and_perspective() {
+// struct GouraudShaderWithTexture {
+//     light_insensity: Vector3<f32>,
+//     light_direction: Vector3<f32>,
+//     matrix: Matrix4<f32>,
+//     texture_matrix: 
+// }
+// impl Shader for GouraudShaderWithTexture {
+//     fn vertex(&mut self, face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertex_index: usize) -> Point3<f32> {
+//         self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &face_vertex_normal));
+//         Point3::from_homogeneous(self.matrix * face_vertex.to_homogeneous()).unwrap()
+//     }
+//     fn fragment(&self, bary_coords: (f32, f32, f32)) -> ((u8, u8, u8), bool) {
+//         let bary_vec = Vector3::new(bary_coords.0, bary_coords.1, bary_coords.2);
+//         let intensity = dot(&bary_vec, &self.light_insensity);
+//         let color = ((255.0 * intensity) as u8, (255.0 * intensity) as u8, (255.0 * intensity) as u8);
+//         (color, false)
+//     }
+// }
+
+struct GouraudShader {
+    light_insensity: Vector3<f32>,
+    light_direction: Vector3<f32>,
+    matrix: Matrix4<f32>,
+}
+impl Shader for GouraudShader {
+    fn vertex(&mut self, face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertex_index: usize) -> Point3<f32> {
+        self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &face_vertex_normal));
+        Point3::from_homogeneous(self.matrix * face_vertex.to_homogeneous()).unwrap()
+    }
+    fn fragment(&self, bary_coords: (f32, f32, f32)) -> ((u8, u8, u8), bool) {
+        let bary_vec = Vector3::new(bary_coords.0, bary_coords.1, bary_coords.2);
+        let intensity = dot(&bary_vec, &self.light_insensity);
+        let color = ((255.0 * intensity) as u8, (255.0 * intensity) as u8, (255.0 * intensity) as u8);
+        (color, false)
+    }
+}
+
+struct GouraudShader6Color {
+    light_insensity: Vector3<f32>,
+    light_direction: Vector3<f32>,
+    matrix: Matrix4<f32>,
+}
+impl Shader for GouraudShader6Color {
+    fn vertex(&mut self, face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertex_index: usize) -> Point3<f32> {
+        self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &face_vertex_normal));
+        Point3::from_homogeneous(self.matrix * face_vertex.to_homogeneous()).unwrap()
+    }
+    fn fragment(&self, bary_coords: (f32, f32, f32)) -> ((u8, u8, u8), bool) {
+        let bary_vec = Vector3::new(bary_coords.0, bary_coords.1, bary_coords.2);
+        let mut intensity = dot(&bary_vec, &self.light_insensity);
+        intensity =
+            if intensity > 0.85 { 1.0 }
+            else if intensity > 0.60 { 0.80 }
+            else if intensity > 0.45 { 0.60 }
+            else if intensity > 0.30 { 0.45 }
+            else if intensity > 0.15 { 0.30 }
+            else { 0.0 };
+        let color = ((255.0 * intensity) as u8, (155.0 * intensity) as u8, (0.0 * intensity) as u8);
+        (color, false)
+    }
+}
+
+fn render_model_with_shaders() {
     let (width, height): (f32, f32) = (800.0, 800.0);
     let mut img = Img::new(width as u32, height as u32);
 
-    model_with_zbuffer_and_perspective(
-        "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj",
-        "/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head_diffuse.tga",
-        &mut img,
-        width,
-        height);
-
-    img.flip_vertical();
-    img.save("output.png");
-}
-
-fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img: &mut Img, width: f32, height: f32) {
-    // let mut zbuffer = vec![vec![-f32::MAX; (height + 20.0) as usize]; (width + 20.0) as usize];
     let mut zbuffer: HashMap<(i32, i32), f32> = HashMap::new();
-    let model = model::parse_obj_file(model_path);
-    println!("{} texture vertices", model.face_texture_vertices.len());
-    let texture = read_texture(texture_path);
+    let model = model::parse_obj_file("/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj");
 
     // eye, center, up
     let model_view = lookat(Vector3::new(0.5, 0.25, 1.0), Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0));
@@ -84,122 +134,22 @@ fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img:
     let m = viewport * project * model_view;
     let m_inv_trans = m4_inverse((project * model_view).transpose());
 
+    let mut gouraud_shader = GouraudShader6Color {
+        light_insensity: Vector3::new(0.0, 0.0, 0.0),
+        light_direction: Vector3::new(1.0, 1.0, 1.0).normalize(),
+        matrix: m,
+    };
+
     for (i, f) in model.faces.iter().enumerate() {
-        // println!("processing face {}: {:?}", i, f);
+        let screen_pt0 = gouraud_shader.vertex(f.0, model.face_normals[i].0, 0).coords;
+        let screen_pt1 = gouraud_shader.vertex(f.1, model.face_normals[i].1, 1).coords;
+        let screen_pt2 = gouraud_shader.vertex(f.2, model.face_normals[i].2, 2).coords;
 
-        let p0 = Point3::from_homogeneous(m * f.0.to_homogeneous()).unwrap();
-        let p1 = Point3::from_homogeneous(m * f.1.to_homogeneous()).unwrap();
-        let p2 = Point3::from_homogeneous(m * f.2.to_homogeneous()).unwrap();
-
-        let vn0 = model.face_normals[i].0;
-        let vn1 = model.face_normals[i].1;
-        let vn2 = model.face_normals[i].2;
-
-        // println!("m_inv_trans is {}", m_inv_trans);
-        // println!("vn0 is {}, m_inv_trans * vn0 is {}", vn0, m_inv_trans * vn0.to_homogeneous());
-        // println!("vn1 is {}, m_inv_trans * vn1 is {}", vn1, m_inv_trans * vn1.to_homogeneous());
-        // println!("vn2 is {}, m_inv_trans * vn2 is {}", vn2, m_inv_trans * vn2.to_homogeneous());
-        let vn0 = Vector3::from_homogeneous(m_inv_trans * vn0.to_homogeneous()).unwrap().normalize();
-        let vn1 = Vector3::from_homogeneous(m_inv_trans * vn1.to_homogeneous()).unwrap().normalize();
-        let vn2 = Vector3::from_homogeneous(m_inv_trans * vn2.to_homogeneous()).unwrap().normalize();
-
-        let u = p1 - p0;
-        let v = p2 - p0;
-        let normal = u.cross(&v).normalize();
-
-        // let light_dir = Vector3::new(0.0, 1.0, 0.75).normalize();
-        let light_dir = Vector3::new(1.0, 0.0, 2.0).normalize();
-        let light_insensity = dot(&light_dir, &normal);
-        // println!("light_insensity is {}", light_insensity);
-        if light_insensity > 0.0 {
-            // let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
-            // println!("vt0 is {}, vt1 is {}, vt2 is {}", vt0, vt1, vt2);
-
-            // let ptx0 = Vector2::new(model.texture_vertices[vt0].0 * 1024.0, model.texture_vertices[vt0].1 * 1024.0);
-            // let ptx1 = Vector2::new(model.texture_vertices[vt1].0 * 1024.0, model.texture_vertices[vt1].1 * 1024.0);
-            // let ptx2 = Vector2::new(model.texture_vertices[vt2].0 * 1024.0, model.texture_vertices[vt2].1 * 1024.0);
-
-            // light direction is (0, 0, 1)
-            let light_intensity0 = dot(&light_dir, &vn0);
-            let light_intensity1 = dot(&light_dir, &vn1);
-            let light_intensity2 = dot(&light_dir, &vn2);
-
-            // println!("point coords: {:?}, {:?}, {:?}", p0.coords, p1.coords, p2.coords);
-            triangle_with_zbuff_and_texture(
-                p0.coords,
-                p1.coords,
-                p2.coords,
-                light_intensity0,
-                light_intensity1,
-                light_intensity2,
-                img,
-                &texture,
-                &mut zbuffer);
-        }
+        triangle(screen_pt0, screen_pt1, screen_pt2, &gouraud_shader, &mut img, &mut zbuffer);
     }
-}
 
-fn triangle_with_zbuff_and_texture(
-    p0: Vector3<f32>,
-    p1: Vector3<f32>,
-    p2: Vector3<f32>,
-    light_intensity0: f32,
-    light_intensity1: f32,
-    light_intensity2: f32,
-    img: &mut Img,
-    texture: &ImageBuffer<Rgb<u8>, Vec<u8>>,
-    zbuffer: &mut HashMap<(i32, i32), f32>)
-{
-    let _ = texture;
-    let bb_up_right = Vector2::<i32>::new(max(p0.x, max(p1.x, p2.x)) as i32, max(0.0, min(p0.y, min(p1.y, p2.y))) as i32);
-    let bb_lower_left = Vector2::<i32>::new(max(0.0, min(p0.x, min(p1.x, p2.x))) as i32, max(p0.y, max(p1.y, p2.y)) as i32);
-
-    for x in bb_lower_left.x..(bb_up_right.x + 1) {
-        for y in bb_up_right.y..(bb_lower_left.y + 1) {
-            let bary = barycentric(Vector2::new(x as f32, y as f32), (p0.remove_row(2), p1.remove_row(2), p2.remove_row(2)));
-
-            if bary.0 >= 0.0 && bary.1 >= 0.0 && bary.2 >= 0.0 {
-                // ???: How is this the z coord
-                let mut z = p0.z as f32 * bary.0
-                    + p1.z as f32 * bary.1
-                    + p2.z as f32 * bary.2;
-
-                // // coordinate in the texture
-                // let tcoord = bary_to_cart(
-                //     (ptx0, ptx1, ptx2),
-                //     bary);
-                // // texture pixel to use
-                // let tpx = texture.get_pixel(tcoord.x as u32, (1024.0 - tcoord.y) as u32);
-                // let color = (
-                //     (tpx[0] as f32 * light_insensity) as u8,
-                //     (tpx[1] as f32 * light_insensity) as u8,
-                //     (tpx[2] as f32 * light_insensity) as u8);
-
-                let mut light_insensity = light_intensity0 * bary.0 + light_intensity1 * bary.1 + light_intensity2 * bary.2;
-                // Not sure how some of li params are negative but there are so protect against
-                // negative light_insensity
-                if light_insensity < 0.0 {
-                    light_insensity = 0.0;
-                }
-                // light_insensity = (f32::sin((light_insensity - 1.0) * f32::consts::PI/2.0) + 1.0) / 2.0;
-                let color = ((light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8, (light_insensity * 255.0) as u8);
-
-                match zbuffer.entry((x as i32, y as i32)) {
-                    Occupied(mut e) => {
-                        let mut val = e.get_mut();
-                        if *val < z {
-                            *val = z;
-                            img.set(x as u32, y as u32, color);
-                        }
-                    },
-                    Vacant(e) => {
-                        e.insert(z);
-                        img.set(x as u32, y as u32, color);
-                    }
-                }
-            }
-        }
-    }
+    img.flip_vertical();
+    img.save("output.png");
 }
 
 fn lookat(eye: Vector3<f32>, center: Vector3<f32>, up: Vector3<f32>) -> Matrix4<f32> {
