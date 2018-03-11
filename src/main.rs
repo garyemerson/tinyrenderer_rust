@@ -23,6 +23,7 @@ use nalgebra::core::{Vector3, Vector2, Matrix4};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use cgmath::{SquareMatrix};
+use nalgebra::dot;
 
 
 fn max(x: f32, y: f32) -> f32 {
@@ -106,8 +107,9 @@ fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img:
         let v = p2 - p0;
         let normal = u.cross(&v).normalize();
 
-        // light direction is (0, 0, 1)
-        let light_insensity = 1.0 * normal.z;
+        // let light_dir = Vector3::new(0.0, 1.0, 0.75).normalize();
+        let light_dir = Vector3::new(1.0, 0.0, 2.0).normalize();
+        let light_insensity = dot(&light_dir, &normal);
         // println!("light_insensity is {}", light_insensity);
         if light_insensity > 0.0 {
             // let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
@@ -118,20 +120,19 @@ fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img:
             // let ptx2 = Vector2::new(model.texture_vertices[vt2].0 * 1024.0, model.texture_vertices[vt2].1 * 1024.0);
 
             // light direction is (0, 0, 1)
-            let li0 = 1.0 * vn0.z;
-            let li1 = 1.0 * vn1.z;
-            let li2 = 1.0 * vn2.z;
+            let light_intensity0 = dot(&light_dir, &vn0);
+            let light_intensity1 = dot(&light_dir, &vn1);
+            let light_intensity2 = dot(&light_dir, &vn2);
 
             // println!("point coords: {:?}, {:?}, {:?}", p0.coords, p1.coords, p2.coords);
             triangle_with_zbuff_and_texture(
                 p0.coords,
                 p1.coords,
                 p2.coords,
-                li0,
-                li1,
-                li2,
+                light_intensity0,
+                light_intensity1,
+                light_intensity2,
                 img,
-                light_insensity,
                 &texture,
                 &mut zbuffer);
         }
@@ -142,15 +143,13 @@ fn triangle_with_zbuff_and_texture(
     p0: Vector3<f32>,
     p1: Vector3<f32>,
     p2: Vector3<f32>,
-    li0: f32,
-    li1: f32,
-    li2: f32,
+    light_intensity0: f32,
+    light_intensity1: f32,
+    light_intensity2: f32,
     img: &mut Img,
-    light_insensity: f32,
     texture: &ImageBuffer<Rgb<u8>, Vec<u8>>,
     zbuffer: &mut HashMap<(i32, i32), f32>)
 {
-    let _ = light_insensity;
     let _ = texture;
     let bb_up_right = Vector2::<i32>::new(max(p0.x, max(p1.x, p2.x)) as i32, max(0.0, min(p0.y, min(p1.y, p2.y))) as i32);
     let bb_lower_left = Vector2::<i32>::new(max(0.0, min(p0.x, min(p1.x, p2.x))) as i32, max(p0.y, max(p1.y, p2.y)) as i32);
@@ -176,7 +175,7 @@ fn triangle_with_zbuff_and_texture(
                 //     (tpx[1] as f32 * light_insensity) as u8,
                 //     (tpx[2] as f32 * light_insensity) as u8);
 
-                let mut light_insensity = li0 * bary.0 + li1 * bary.1 + li2 * bary.2;
+                let mut light_insensity = light_intensity0 * bary.0 + light_intensity1 * bary.1 + light_intensity2 * bary.2;
                 // Not sure how some of li params are negative but there are so protect against
                 // negative light_insensity
                 if light_insensity < 0.0 {
