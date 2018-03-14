@@ -134,11 +134,17 @@ fn render_model_with_shaders() {
     let m = viewport * project * model_view;
     let m_inv_trans = m4_inverse((project * model_view).transpose());
 
-    let mut gouraud_shader = GouraudShader6Color {
+    let mut gouraud_shader = GouraudShader {
         light_insensity: Vector3::new(0.0, 0.0, 0.0),
         light_direction: Vector3::new(1.0, 1.0, 1.0).normalize(),
         matrix: m,
     };
+
+    // let mut gouraud_shader = GouraudShader6Color {
+    //     light_insensity: Vector3::new(0.0, 0.0, 0.0),
+    //     light_direction: Vector3::new(1.0, 1.0, 1.0).normalize(),
+    //     matrix: m,
+    // };
 
     for (i, f) in model.faces.iter().enumerate() {
         let screen_pt0 = gouraud_shader.vertex(f.0, model.face_normals[i].0, 0).coords;
