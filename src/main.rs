@@ -9,12 +9,14 @@ mod our_gl;
 mod old;
 mod model;
 
+use model::Model;
 use img::Img;
 use our_gl::{Shader, triangle};
 // use old::*;
 
 use std::io::BufReader;
 use std::fs::File;
+use std::time::Instant;
 use regex::Regex;
 use std::{fmt, cmp, f32};
 use rand::random;
@@ -42,19 +44,23 @@ const GREEN: (u8, u8, u8) = (0, 255, 0);
 const BLUE: (u8, u8, u8) = (0, 0, 255);
 
 fn main() {
+    let now = Instant::now();
     render_model_with_shaders();
+    println!("end to end took {}ms", (now.elapsed().as_secs() * 1000) + (now.elapsed().subsec_millis() as u64));
 }
 
 // struct GouraudShaderWithTexture {
-//     light_insensity: Vector3<f32>,
-//     light_direction: Vector3<f32>,
+//     model: Model,
 //     matrix: Matrix4<f32>,
-//     texture_matrix: 
+//     light_direction: Vector3<f32>,
+
+//     light_insensity: Vector3<f32>,
+//     // texture_matrix: Matrix2x3<f32>,
 // }
-// impl Shader for GouraudShaderWithTexture {
-//     fn vertex(&mut self, face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertex_index: usize) -> Point3<f32> {
-//         self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &face_vertex_normal));
-//         Point3::from_homogeneous(self.matrix * face_vertex.to_homogeneous()).unwrap()
+// impl Shader for GouraudShader {
+//     fn vertex(&mut self, face_index: usize, vertex_index: usize) -> Point3<f32> {
+//         self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &self.model.face_normals[face_index][vertex_index]));
+//         Point3::from_homogeneous(self.matrix * self.model.faces[face_index][vertex_index].to_homogeneous()).unwrap()
 //     }
 //     fn fragment(&self, bary_coords: (f32, f32, f32)) -> ((u8, u8, u8), bool) {
 //         let bary_vec = Vector3::new(bary_coords.0, bary_coords.1, bary_coords.2);
@@ -65,14 +71,15 @@ fn main() {
 // }
 
 struct GouraudShader {
+    model: Model,
+    matrix: Matrix4<f32>,
     light_insensity: Vector3<f32>,
     light_direction: Vector3<f32>,
-    matrix: Matrix4<f32>,
 }
 impl Shader for GouraudShader {
-    fn vertex(&mut self, face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertex_index: usize) -> Point3<f32> {
-        self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &face_vertex_normal));
-        Point3::from_homogeneous(self.matrix * face_vertex.to_homogeneous()).unwrap()
+    fn vertex(&mut self, face_index: usize, vertex_index: usize) -> Point3<f32> {
+        self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &self.model.face_normals[face_index][vertex_index]));
+        Point3::from_homogeneous(self.matrix * self.model.faces[face_index][vertex_index].to_homogeneous()).unwrap()
     }
     fn fragment(&self, bary_coords: (f32, f32, f32)) -> ((u8, u8, u8), bool) {
         let bary_vec = Vector3::new(bary_coords.0, bary_coords.1, bary_coords.2);
@@ -83,14 +90,15 @@ impl Shader for GouraudShader {
 }
 
 struct GouraudShader6Color {
+    model: Model,
+    matrix: Matrix4<f32>,
     light_insensity: Vector3<f32>,
     light_direction: Vector3<f32>,
-    matrix: Matrix4<f32>,
 }
 impl Shader for GouraudShader6Color {
-    fn vertex(&mut self, face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertex_index: usize) -> Point3<f32> {
-        self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &face_vertex_normal));
-        Point3::from_homogeneous(self.matrix * face_vertex.to_homogeneous()).unwrap()
+    fn vertex(&mut self, face_index: usize, vertex_index: usize) -> Point3<f32> {
+        self.light_insensity[vertex_index] = max(0.0, dot(&self.light_direction, &self.model.face_normals[face_index][vertex_index]));
+        Point3::from_homogeneous(self.matrix * self.model.faces[face_index][vertex_index].to_homogeneous()).unwrap()
     }
     fn fragment(&self, bary_coords: (f32, f32, f32)) -> ((u8, u8, u8), bool) {
         let bary_vec = Vector3::new(bary_coords.0, bary_coords.1, bary_coords.2);
@@ -108,12 +116,16 @@ impl Shader for GouraudShader6Color {
 }
 
 fn render_model_with_shaders() {
+    let mut now = Instant::now();
+    let model = model::parse_obj_file("/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj");
+    println!("parsing model took {}ms", (now.elapsed().as_secs() * 1000) + (now.elapsed().subsec_millis() as u64));
+
+    now = Instant::now();
     let (width, height): (f32, f32) = (800.0, 800.0);
     let mut img = Img::new(width as u32, height as u32);
+    println!("img creation took {}ms", (now.elapsed().as_secs() * 1000) + (now.elapsed().subsec_millis() as u64));
 
-    let mut zbuffer: HashMap<(i32, i32), f32> = HashMap::new();
-    let model = model::parse_obj_file("/Users/Garrett/Dropbox/Files/workspaces/tinyrenderer_rust/african_head.obj");
-
+    now = Instant::now();
     // eye, center, up
     let model_view = lookat(Vector3::new(0.5, 0.25, 1.0), Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 1.0, 0.0));
     // Add perspective
@@ -133,29 +145,38 @@ fn render_model_with_shaders() {
     // final matrix
     let m = viewport * project * model_view;
     let m_inv_trans = m4_inverse((project * model_view).transpose());
+    println!("matrix math took {}ms", (now.elapsed().as_secs() * 1000) + (now.elapsed().subsec_millis() as u64));
 
+    now = Instant::now();
     let mut gouraud_shader = GouraudShader {
         light_insensity: Vector3::new(0.0, 0.0, 0.0),
         light_direction: Vector3::new(1.0, 1.0, 1.0).normalize(),
         matrix: m,
+        model: model,
     };
-
     // let mut gouraud_shader = GouraudShader6Color {
-    //     light_insensity: Vector3::new(0.0, 0.0, 0.0),
-    //     light_direction: Vector3::new(1.0, 1.0, 1.0).normalize(),
-    //     matrix: m,
+        // light_insensity: Vector3::new(0.0, 0.0, 0.0),
+        // light_direction: Vector3::new(1.0, 1.0, 1.0).normalize(),
+        // matrix: m,
+        // model: model,
     // };
+    println!("shader creation took {}ms", (now.elapsed().as_secs() * 1000) + (now.elapsed().subsec_millis() as u64));
 
-    for (i, f) in model.faces.iter().enumerate() {
-        let screen_pt0 = gouraud_shader.vertex(f.0, model.face_normals[i].0, 0).coords;
-        let screen_pt1 = gouraud_shader.vertex(f.1, model.face_normals[i].1, 1).coords;
-        let screen_pt2 = gouraud_shader.vertex(f.2, model.face_normals[i].2, 2).coords;
+    now = Instant::now();
+    let mut zbuffer: HashMap<(i32, i32), f32> = HashMap::new();
+    for face_index in 0..gouraud_shader.model.faces.len() {
+        let screen_pt0 = gouraud_shader.vertex(face_index, 0).coords;
+        let screen_pt1 = gouraud_shader.vertex(face_index, 1).coords;
+        let screen_pt2 = gouraud_shader.vertex(face_index, 2).coords;
 
         triangle(screen_pt0, screen_pt1, screen_pt2, &gouraud_shader, &mut img, &mut zbuffer);
     }
+    println!("loop took {}ms", (now.elapsed().as_secs() * 1000) + (now.elapsed().subsec_millis() as u64));
 
+    now = Instant::now();
     img.flip_vertical();
     img.save("output.png");
+    println!("img tasks took {}ms", (now.elapsed().as_secs() * 1000) + (now.elapsed().subsec_millis() as u64));
 }
 
 fn lookat(eye: Vector3<f32>, center: Vector3<f32>, up: Vector3<f32>) -> Matrix4<f32> {

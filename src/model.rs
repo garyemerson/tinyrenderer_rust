@@ -7,13 +7,13 @@ use nalgebra::core::{Vector3};
 
 pub struct Model {
     // Triangles that make up to the faces of the object
-    pub faces: Vec<(Point3<f32>, Point3<f32>, Point3<f32>)>,
+    pub faces: Vec<[Point3<f32>; 3]>,
 
     // Normal vectors for each vertice of each face
-    pub face_normals: Vec<(Vector3<f32>, Vector3<f32>, Vector3<f32>)>,
+    pub face_normals: Vec<[Vector3<f32>; 3]>,
 
     // For each face, the 2d points in the texture that correspond to each of face vertices
-    pub face_texture_vertices: Vec<(Point2<f32>, Point2<f32>, Point2<f32>)>,
+    pub face_texture_vertices: Vec<[Point2<f32>; 3]>,
 }
 
 struct RawModel {
@@ -35,9 +35,9 @@ struct RawModel {
 
 impl From<RawModel> for Model {
     fn from(raw_model: RawModel) -> Model {
-        let mut faces: Vec<(Point3<f32>, Point3<f32>, Point3<f32>)> = Vec::with_capacity(raw_model.faces.len());
-        let mut face_normals: Vec<(Vector3<f32>, Vector3<f32>, Vector3<f32>)> = Vec::with_capacity(raw_model.faces.len());
-        let mut face_texture_vertices: Vec<(Point2<f32>, Point2<f32>, Point2<f32>)> = Vec::with_capacity(raw_model.faces.len());
+        let mut faces: Vec<[Point3<f32>; 3]> = Vec::with_capacity(raw_model.faces.len());
+        let mut face_normals: Vec<[Vector3<f32>; 3]> = Vec::with_capacity(raw_model.faces.len());
+        let mut face_texture_vertices: Vec<[Point2<f32>; 3]> = Vec::with_capacity(raw_model.faces.len());
         for f in raw_model.faces {
             let p0 = Point3::new( 
                 raw_model.vertices[((f.0).0 - 1)].0,
@@ -51,7 +51,7 @@ impl From<RawModel> for Model {
                 raw_model.vertices[((f.0).2 - 1)].0,
                 raw_model.vertices[((f.0).2 - 1)].1,
                 raw_model.vertices[((f.0).2 - 1)].2);
-            faces.push((p0, p1, p2));
+            faces.push([p0, p1, p2]);
 
             let vn0 = Vector3::new( 
                 raw_model.vertice_normals[((f.0).0 - 1)].0,
@@ -65,13 +65,13 @@ impl From<RawModel> for Model {
                 raw_model.vertice_normals[((f.0).2 - 1)].0,
                 raw_model.vertice_normals[((f.0).2 - 1)].1,
                 raw_model.vertice_normals[((f.0).2 - 1)].2);
-            face_normals.push((vn0, vn1, vn2));
+            face_normals.push([vn0, vn1, vn2]);
 
             let (vt0, vt1, vt2) = ((f.1).0 - 1, (f.1).1 - 1, (f.1).2 - 1);
             let tx0 = Point2::new(raw_model.texture_vertices[vt0].0 * 1024.0, raw_model.texture_vertices[vt0].1 * 1024.0);
             let tx1 = Point2::new(raw_model.texture_vertices[vt1].0 * 1024.0, raw_model.texture_vertices[vt1].1 * 1024.0);
             let tx2 = Point2::new(raw_model.texture_vertices[vt2].0 * 1024.0, raw_model.texture_vertices[vt2].1 * 1024.0);
-            face_texture_vertices.push((tx0, tx1, tx2));
+            face_texture_vertices.push([tx0, tx1, tx2]);
         }
 
         Model {

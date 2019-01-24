@@ -1,2 +1,9 @@
 /target/
 **/*.rs.bk
+african_head.obj
+african_head_diffuse.tga
+diablo3_pose.obj
+grid.tga
+output.png
+snapchat-dancing-hotdog-meme/
+tinyrenderer_rust.sublime-workspace

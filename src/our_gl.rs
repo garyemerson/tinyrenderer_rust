@@ -7,7 +7,7 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use super::{barycentric, max, min};
 
 pub trait Shader {
-    fn vertex(&mut self, face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertice_index: usize) -> Point3<f32>;
+    fn vertex(&mut self, face_index: usize, vertex_index:usize) /*face_vertex: Point3<f32>, face_vertex_normal: Vector3<f32>, vertice_index: usize)*/ -> Point3<f32>;
     fn fragment(&self, bary_coords: (f32, f32, f32)) -> ((u8, u8, u8), bool);
 }
 

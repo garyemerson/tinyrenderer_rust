@@ -66,13 +66,13 @@ fn model_with_zbuffer_and_perspective(model_path: &str, texture_path: &str, img:
     for (i, f) in model.faces.iter().enumerate() {
         // println!("processing face {}: {:?}", i, f);
 
-        let p0 = Point3::from_homogeneous(m * f.0.to_homogeneous()).unwrap();
-        let p1 = Point3::from_homogeneous(m * f.1.to_homogeneous()).unwrap();
-        let p2 = Point3::from_homogeneous(m * f.2.to_homogeneous()).unwrap();
+        let p0 = Point3::from_homogeneous(m * f[0].to_homogeneous()).unwrap();
+        let p1 = Point3::from_homogeneous(m * f[1].to_homogeneous()).unwrap();
+        let p2 = Point3::from_homogeneous(m * f[2].to_homogeneous()).unwrap();
 
-        let vn0 = model.face_normals[i].0;
-        let vn1 = model.face_normals[i].1;
-        let vn2 = model.face_normals[i].2;
+        let vn0 = model.face_normals[i][0];
+        let vn1 = model.face_normals[i][1];
+        let vn2 = model.face_normals[i][2];
 
         // println!("m_inv_trans is {}", m_inv_trans);
         // println!("vn0 is {}, m_inv_trans * vn0 is {}", vn0, m_inv_trans * vn0.to_homogeneous());
